@@ -190,19 +190,36 @@ function DocEditor({ docId, templates, parties, onClose, onSaved }: {
   const [reason, setReason] = useState(existing?.reason || "");
   const [witness1, setWitness1] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الأول"))?.name || "");
   const [witness1Id, setWitness1Id] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الأول"))?.idNumber || "");
-
-  /* تهيئة الحقول عند تحميل المستند الموجود (استعلام غير متزامن) */
-  useEffect(() => {
-    if (existing) {
-      setDueDate((v) => v || existing.dueDate || "");
-      setReason((v) => v || existing.reason || "");
-    }
-  }, [existing]);
   const [witness2, setWitness2] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الثاني"))?.name || "");
   const [witness2Id, setWitness2Id] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الثاني"))?.idNumber || "");
   const [body, setBody] = useState(existing?.body || "");
   const [printAfter, setPrintAfter] = useState(true);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+
+  /* ⚠️ إصلاح حرج: عند تعديل مستند، يُحمَّل `existing` بشكل غير متزامن بعد تركيب
+     المحرر — كانت الحقول تُهيّأ فارغة وتبقى كذلك (فقدان البيانات عند الحفظ).
+     الآن تُعبَّأ جميع الحقول من المستند المحمّل مرة واحدة عند وصوله. */
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!docId || !existing || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setDocType(existing.type);
+    setTemplateId(existing.templateId);
+    setTitle(existing.title);
+    setPartyId(existing.partyId || "");
+    setAmount(existing.amount !== undefined ? String(existing.amount) : "");
+    setCurrency(existing.currency);
+    setDate(existing.date);
+    setDueDate(existing.dueDate || "");
+    setReason(existing.reason || "");
+    const w1 = existing.parties.find((p) => p.role.includes("الشاهد الأول"));
+    setWitness1(w1?.name || "");
+    setWitness1Id(w1?.idNumber || "");
+    const w2 = existing.parties.find((p) => p.role.includes("الشاهد الثاني"));
+    setWitness2(w2?.name || "");
+    setWitness2Id(w2?.idNumber || "");
+    setBody(existing.body);
+  }, [existing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = templates.filter((t) => t.type === docType);
 

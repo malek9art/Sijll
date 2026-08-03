@@ -41,7 +41,10 @@ export function fmtDate(iso: string, arabic = true, withTime = false): string {
 }
 
 export function hijriDate(iso: string): string {
-  const d = new Date(iso);
+  /* تفسير محلي للتاريخ (وليس UTC) — "2026-08-03" تعني الثالث محلياً في كل المناطق */
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(iso)
+    ? (() => { const [y, m, day] = iso.split("-").map(Number); return new Date(y, m - 1, day); })()
+    : new Date(iso);
   if (isNaN(d.getTime())) return "";
   try {
     return new Intl.DateTimeFormat("ar-SA-u-ca-islamic-umalqura", { day: "numeric", month: "long", year: "numeric" }).format(d);
@@ -50,20 +53,38 @@ export function hijriDate(iso: string): string {
   }
 }
 
+/** تاريخ اليوم بالتوقيت المحلي (وليس UTC — كان يعطي اليوم السابق في الساعات الأولى) */
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 export function addDays(iso: string, days: number): string {
-  const d = new Date(iso);
+  const d = parseLocalDate(iso);
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return toISODate(d);
 }
 
 export function addMonths(iso: string, months: number): string {
-  const d = new Date(iso);
+  const d = parseLocalDate(iso);
   d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
+  return toISODate(d);
+}
+
+/** تحليل "yyyy-mm-dd" كتاريخ محلي — ثابت بين البيئات */
+function parseLocalDate(iso: string): Date {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 export function daysUntil(iso: string): number {
@@ -78,7 +99,8 @@ export function daysUntil(iso: string): number {
 const ONES = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة", "عشرة",
   "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر", "ثمانية عشر", "تسعة عشر"];
 const TENS = ["", "", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
-const HUNDREDS = ["", "مائة", "مائتان", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
+/* "مائتا" بلا نون: العدد 200 في التركيب الإضافي (مائتا ريال، مائتا ألف) */
+const HUNDREDS = ["", "مائة", "مائتا", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
 
 function threeDigits(n: number): string {
   const h = Math.floor(n / 100);
@@ -98,10 +120,11 @@ function threeDigits(n: number): string {
 
 function toWords(n: number): string {
   if (n === 0) return "صفر";
+  /* المثنى في التركيب الإضافي بلا نون: ألفا ريال، مليونان → مليونَا ريال */
   const scales: [number, string, string, string][] = [
-    [1e9, "مليار", "ملياران", "مليارات"],
-    [1e6, "مليون", "مليونان", "ملايين"],
-    [1e3, "ألف", "ألفان", "آلاف"],
+    [1e9, "مليار", "مليارا", "مليارات"],
+    [1e6, "مليون", "مليونا", "ملايين"],
+    [1e3, "ألف", "ألفا", "آلاف"],
   ];
   let result = "";
   for (const [value, single, dual, plural] of scales) {
@@ -112,6 +135,8 @@ function toWords(n: number): string {
     if (q === 1) part = single;
     else if (q === 2) part = dual;
     else if (q <= 10) part = `${threeDigits(q)} ${plural}`;
+    /* مضاعفات المئة لا تُنوَّن: "مائة ألف" و"مائتا ألف" و"ثلاثمائة ألف" — لا "ألفًا" */
+    else if (q % 100 === 0) part = `${threeDigits(q)} ${single}`;
     else part = `${threeDigits(q)} ${single}ًا`;
     result += result ? ` و${part}` : part;
   }

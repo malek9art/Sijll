@@ -75,6 +75,20 @@ export async function initDB(): Promise<void> {
     await db.settings.put({ key: "schemaVersion", value: 5 });
   }
 
+  if (currentVersion < 6) {
+    /* تحديث محتوى القوالب المدمجة (isBuiltin) إلى أحدث صياغة محسّنة —
+       المستخدمون القدامى لا يحصلون على القوالب الجديدة إلا بترحيل كهذا.
+       القوالب المخصصة (غير المدمجة) تبقى كما أنشأها المستخدم. */
+    const { DEFAULT_TEMPLATES } = await import("./seed");
+    for (const def of DEFAULT_TEMPLATES) {
+      const t = await db.templates.get(def.id);
+      if (t?.isBuiltin) {
+        await db.templates.update(def.id, { content: def.content, name: def.name });
+      }
+    }
+    await db.settings.put({ key: "schemaVersion", value: 6 });
+  }
+
   await seedIfEmpty();
 }
 
@@ -372,7 +386,9 @@ export const documentsService = {
     if (!src) return undefined;
     const { id: _i, number: _n, createdAt: _c, updatedAt: _u, history: _h, ...rest } = src;
     const now = new Date().toISOString();
-    const doc: LegalDoc = { ...rest, id: uid("doc"), number: await nextNumber("DOC"), history: [{ at: now, action: "نسخة من " + src.number }], createdAt: now, updatedAt: now };
+    /* النسخة الجديدة تُنشأ بدون التواقيع البيومترية — إثباتات التوثيق مرتبطة
+       رقمياً بمستندها الأصلي (تحدي بصمة المستند)، فلا تُنقل للنسخ. */
+    const doc: LegalDoc = { ...rest, signatures: [], id: uid("doc"), number: await nextNumber("DOC"), history: [{ at: now, action: "نسخة من " + src.number }], createdAt: now, updatedAt: now };
     await db.documents.add(doc);
     return doc;
   },
@@ -440,10 +456,43 @@ export const backupService = {
       if (t.settings !== undefined) await db.settings.bulkPut(t.settings as { key: string; value: unknown }[]);
       if (t.ledgerAccounts !== undefined) await db.ledgerAccounts.bulkPut(t.ledgerAccounts as LedgerAccount[]);
       if (t.ledgerEntries !== undefined) await db.ledgerEntries.bulkPut(t.ledgerEntries as LedgerEntry[]);
+      /* حماية العدادات: إن كانت النسخة قديمة (بلا عدادات أو بعدادات أقل من
+         الأرقام الموجودة فعلاً) تُرفع العدادات إلى أقصى رقم — يمنع تكرار
+         أرقام المستندات/العمليات/القيود بعد الاستعادة. */
+      await bumpCounters();
+      /* حماية من إعادة البذر: الاستعادة تعني وجود بيانات فعلية — لا حاجة
+         لإعادة البيانات التجريبية عند التشغيل التالي حتى لو كانت النسخة
+         قديمة جداً بلا علامة seeded. */
+      await db.settings.put({ key: "seeded", value: true });
     });
     await auditService.log("استعادة نسخة احتياطية", "backup", undefined, `replace=${replace}`);
   },
 };
+
+/** رفع العدادات إلى أقصى رقم موجود فعلاً في الجداول (إن كانت أقل) */
+async function bumpCounters(): Promise<void> {
+  const parseMax = (rows: { number: string }[], prefix: string): number => {
+    let max = 0;
+    for (const r of rows) {
+      const m = r.number.match(new RegExp(`^${prefix}-(\\d+)$`));
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return max;
+  };
+  const [docs, debts, entries] = await Promise.all([db.documents.toArray(), db.debts.toArray(), db.journalEntries.toArray()]);
+  const targets: [string, number][] = [
+    ["DOC", parseMax(docs, "DOC")],
+    ["DEBT", parseMax(debts, "DEBT")],
+    ["JE", parseMax(entries, "JE")],
+  ];
+  for (const [prefix, max] of targets) {
+    if (max <= 0) continue;
+    const key = `counter:${prefix}`;
+    const row = await db.settings.get(key);
+    const current = (row?.value as number) || 0;
+    if (current < max) await db.settings.put({ key, value: max });
+  }
+}
 
 /* ====== النسخ الاحتياطية المحلية التلقائية (داخل الجهاز) ======
  * تُنشأ عند تشغيل التطبيق وتُحفظ في IndexedDB مع احتفاظ محدود (الأقدم يُحذف تلقائياً).

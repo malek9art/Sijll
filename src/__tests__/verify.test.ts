@@ -1,6 +1,6 @@
 /* اختبارات التحقق الرقمي + الحذف التلقائي + النسخ المحلية (C-02) */
 import { describe, it, expect, beforeEach } from "vitest";
-import { db, backupService, cleanupService, localBackupService, validateBackup } from "@/lib/db";
+import { db, backupService, cleanupService, documentsService, localBackupService, validateBackup } from "@/lib/db";
 import { buildDocVerifyFields, computeDocDigest, docVerifyCanonical, sha256Hex } from "@/lib/utils";
 
 beforeEach(async () => {
@@ -163,5 +163,97 @@ describe("الاستيراد يستبدل العدادات والإعدادات 
     };
     await backupService.importAll(data, true);
     expect(await db.templates.count()).toBe(0);
+  });
+});
+
+/* ====== إصلاحات الفحص الشامل ====== */
+import { amountToWordsAr, addDays, addMonths, hijriDate } from "@/lib/utils";
+
+describe("صياغة المبالغ (إصلاح التنوين)", () => {
+  it("مضاعفات المئة بلا تنوين: مائة ألف", () => {
+    expect(amountToWordsAr(100000, "ريال")).toContain("مائة ألف ريال");
+    expect(amountToWordsAr(100000, "ريال")).not.toContain("ألفًا");
+  });
+  it("مائتا ألف وثلاثمائة ألف", () => {
+    expect(amountToWordsAr(200000, "ريال")).toContain("مائتا ألف");
+    expect(amountToWordsAr(300000, "ريال")).toContain("ثلاثمائة ألف");
+  });
+  it("الأعداد المركبة تحتفظ بالتنوين الصحيح: أحد عشر ألفًا", () => {
+    expect(amountToWordsAr(11000, "ريال")).toContain("أحد عشر ألفًا");
+  });
+  it("الآلاف الثلاثة: ثلاثة آلاف", () => {
+    expect(amountToWordsAr(3000, "ريال")).toContain("ثلاثة آلاف");
+  });
+  it("المثنى في التركيب الإضافي بلا نون: ألفا ريال ومليونا ريال", () => {
+    expect(amountToWordsAr(2000, "ريال")).toContain("ألفا ريال");
+    expect(amountToWordsAr(2000000, "ريال")).toContain("مليونا ريال");
+    expect(amountToWordsAr(2000, "ريال")).not.toContain("ألفان");
+  });
+  it("مبلغ مركب: 68469.43", () => {
+    const s = amountToWordsAr(68469.43, "ريال سعودي");
+    expect(s).toContain("ريال سعودي");
+    expect(s).toContain("هللة");
+  });
+});
+
+describe("أدوات التاريخ المحلي (إصلاح UTC)", () => {
+  it("addDays يحافظ على التاريخ المحلي عبر الشهور", () => {
+    expect(addDays("2026-01-31", 1)).toBe("2026-02-01");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(addDays("2026-03-01", -1)).toBe("2026-02-28");
+  });
+  it("addMonths يحافظ على التاريخ المحلي", () => {
+    expect(addMonths("2026-01-15", 1)).toBe("2026-02-15");
+    expect(addMonths("2026-11-15", 2)).toBe("2027-01-15");
+  });
+});
+
+describe("نسخ المستند لا ينقل التواقيع البيومترية (إصلاح)", () => {
+  it("النسخة الجديدة بدون تواقيع — التوثيق مرتبط بمستندها الأصلي", async () => {
+    const doc = await documentsService.save({
+      type: "acknowledgment" as const,
+      title: "أصلي", templateId: "tpl-ack", amount: 100, currency: "SAR" as const,
+      date: "2026-01-01", body: "نص", parties: [], status: "final" as const,
+    });
+    await documentsService.sign(doc.id, {
+      role: "الطرف الثاني", name: "أحمد", method: "biometric",
+      at: new Date().toISOString(), credentialId: "cred1", signature: "sig",
+    });
+    const copy = await documentsService.duplicate(doc.id);
+    expect(copy!.signatures?.length || 0).toBe(0);
+    const orig = await documentsService.get(doc.id);
+    expect(orig!.signatures?.length).toBe(1);
+  });
+});
+
+describe("رفع العدادات بعد الاستعادة (إصلاح تكرار الأرقام)", () => {
+  it("عدادات أقل من الأرقام الموجودة تُرفع تلقائياً", async () => {
+    await db.documents.add({
+      id: "doc-x", number: "DOC-0042", type: "acknowledgment", title: "س",
+      templateId: "t", currency: "SAR", date: "2026-01-01", body: "ب",
+      parties: [], status: "final", history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    /* نسخة قديمة تحتوي وثيقة رقمها 42 لكن عدادها منخفض (5) */
+    const data = {
+      version: 3, parties: [], debts: [], payments: [], accounts: [], journalEntries: [],
+      templates: [], documents: [{
+        id: "doc-x", number: "DOC-0042", type: "acknowledgment", title: "س",
+        templateId: "t", currency: "SAR", date: "2026-01-01", body: "ب",
+        parties: [], status: "final", history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }], auditLogs: [], notifications: [],
+      settings: [{ key: "counter:DOC", value: 5 }], ledgerAccounts: [], ledgerEntries: [],
+    };
+    await backupService.importAll(data, true);
+    const row = await db.settings.get("counter:DOC");
+    expect(row?.value).toBe(42);
+  });
+});
+
+describe("التاريخ الهجري (إصلاح التفسير المحلي)", () => {
+  it("يعيد تاريخاً هجرياً صحيحاً لتاريخ ميلادي", () => {
+    const h = hijriDate("2026-08-03");
+    expect(h).not.toBe("");
+    expect(h).toMatch(/[0-9٠-٩]/);
+    expect(h).toContain("هـ");
   });
 });
