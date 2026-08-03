@@ -75,3 +75,55 @@ export async function verifyBiometric(credentialIdB64: string): Promise<boolean>
     return false;
   }
 }
+
+/* ====== التوثيق البيومتري للمستندات (التوقيع بالبصمة) ======
+ * يطلب من حساس البصمة بالجهاز (WebAuthn — platform authenticator) تحققاً فورياً
+ * بهوية المستخدم، ويعيد "إثبات التوثيق" (assertion) يُحفظ مع المستند:
+ *   • البصمة نفسها لا تُخزَّن ولا تخرج من الحساس أبداً — خصوصية كاملة.
+ *   • ما يُحفظ: معرّف الاعتماد، التحدي (مشتق من بصمة المستند الرقمية)،
+ *     بيانات الاعتماد المشفرة، والتوقيع — دليل تحقق بيومتري فوري مربوط بالمستند.
+ */
+export interface BiometricAttestation {
+  credentialId: string;      // b64
+  challenge: string;         // b64
+  clientDataJSON: string;    // b64
+  authenticatorData: string; // b64
+  signature: string;         // b64
+  rpId: string;
+}
+
+/** توقيع/توثيق مستند بحساس البصمة — يعيد إثبات تحقق بيومتري مربوط بالتحدي الممرَّر */
+export async function signWithBiometric(challengeText: string, knownCredentialIdB64?: string): Promise<BiometricAttestation> {
+  if (!window.isSecureContext) throw new Error("يتطلب التوثيق البيومتري بيئة آمنة (HTTPS)");
+  if (!window.PublicKeyCredential) throw new Error("هذا الجهاز لا يدعم التوثيق البيومتري (WebAuthn)");
+  if (!PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
+    throw new Error("لا يتوفر حساس بصمة على هذا الجهاز");
+  }
+  const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  if (!available) throw new Error("لا يتوفر حساس بصمة على هذا الجهاز");
+
+  const challenge = new TextEncoder().encode(challengeText);
+  const allowCredentials: PublicKeyCredentialDescriptor[] = knownCredentialIdB64
+    ? [{ type: "public-key", id: b64ToBuf(knownCredentialIdB64) }]
+    : [];
+
+  const cred = (await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      allowCredentials,
+      userVerification: "required",
+      timeout: 60000,
+    },
+  })) as PublicKeyCredential | null;
+  if (!cred) throw new Error("أُلغي التوثيق البيومتري");
+
+  const res = cred.response as AuthenticatorAssertionResponse;
+  return {
+    credentialId: bufToB64(cred.rawId),
+    challenge: bufToB64(challenge),
+    clientDataJSON: bufToB64(res.clientDataJSON),
+    authenticatorData: bufToB64(res.authenticatorData),
+    signature: bufToB64(res.signature),
+    rpId: window.location.hostname,
+  };
+}

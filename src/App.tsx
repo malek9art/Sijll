@@ -213,6 +213,19 @@ function Router() {
 
   useEffect(() => {
     ensureReminders().catch(() => {});
+    /* مهام الصيانة التلقائية عند التشغيل: الحذف التلقائي للبيانات القديمة +
+       النسخ الاحتياطي التلقائي (محلي يومي، وسحابي عند التفعيل). */
+    void (async () => {
+      try {
+        const { settingsService, cleanupService } = await import("@/lib/db");
+        const s = await settingsService.get();
+        await cleanupService.run(s);
+      } catch { /* غير حرج */ }
+      try {
+        const { runAutoBackups } = await import("@/lib/backup-auto");
+        await runAutoBackups();
+      } catch { /* غير حرج */ }
+    })();
   }, []);
 
   /* اختصارات لوحة المفاتيح */

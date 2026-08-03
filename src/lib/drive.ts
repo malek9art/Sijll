@@ -127,3 +127,13 @@ export async function downloadBackupFromDrive(fileId: string): Promise<string> {
   if (!res.ok) throw new Error("تعذر تنزيل الملف");
   return res.text();
 }
+
+/** حذف نسخة من درايف (يُستخدم في سياسة الاحتفاظ بالنسخ الأخيرة فقط) */
+export async function deleteDriveBackup(fileId: string): Promise<void> {
+  if (!isDriveConnected()) await connectDrive(currentClientId);
+  const res = await fetch(`${DRIVE_FILES}/${fileId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok && res.status !== 404) throw new Error(`فشل حذف النسخة (${res.status})`);
+}
