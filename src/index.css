@@ -237,6 +237,19 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
 }
 .sheet .sign-line { border-bottom: 1px solid #94a3b8; height: 26px; margin: 4px 8px 6px; }
 
+/* بصمة الإصبع المُرسمة في صندوق التوقيع — كأنها بُصِّمت على ورقة */
+.sheet .sign-box .fp-img {
+  display: block;
+  width: 15mm;
+  height: 19mm;
+  object-fit: cover;
+  margin: 2px auto 3px;
+  border-radius: 1.5mm;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: inset 0 0 1.5mm rgba(15, 23, 42, 0.06);
+}
+
 /* التذييل */
 .sheet .sheet-foot {
   margin-top: 16px;

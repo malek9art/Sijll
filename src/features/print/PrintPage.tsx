@@ -10,6 +10,7 @@ import { Button, Field, Input, Modal, Select } from "@/components/ui";
 import { Logo } from "@/components/Logo";
 import { downloadPDF, sharePDFviaWhatsApp } from "@/lib/pdf";
 import { signWithBiometric } from "@/lib/biometric";
+import { fingerprintDataUrl } from "@/lib/fingerprint";
 import { CURRENCIES, DEBT_TYPES, DOC_TYPES, PAYMENT_METHODS, type Debt, type JournalEntry, type Payment } from "@/lib/types";
 import { amountToWordsAr, buildDocVerifyFields, buildDocVerifyUrl, computeDocDigest, currencySymbol, fmtDate, fmtMoney, hijriDate, toBase, toDigits, todayISO } from "@/lib/utils";
 
@@ -196,6 +197,24 @@ function DocSheet({ id }: { id: string }) {
   const [signRole, setSignRole] = useState("الطرف الثاني");
   const [signName, setSignName] = useState("");
   const [signBusy, setSignBusy] = useState(false);
+  /* صور البصمات المُرسمة لكل توقيع بيومتري (مفتاح = معرّف التوقيع) */
+  const [fpMap, setFpMap] = useState<Record<string, string>>({});
+
+  /* رسم بصمة كل موقّع بيومترياً — ثابتة لكل موقّع كبصمته الحقيقية */
+  useEffect(() => {
+    let cancelled = false;
+    const sigs = doc?.signatures?.filter((s) => s.method === "biometric") || [];
+    if (sigs.length === 0) return;
+    (async () => {
+      const map: Record<string, string> = {};
+      for (const s of sigs) {
+        const seed = `sajil-fp|${s.credentialId || s.id}|${s.role}`;
+        map[s.id] = await fingerprintDataUrl(seed);
+      }
+      if (!cancelled) setFpMap(map);
+    })();
+    return () => { cancelled = true; };
+  }, [doc]);
 
   /* رابط صفحة التحقق المستقلة — يُضمَّن في رمز QR مع بصمة المستند الرقمية */
   useEffect(() => {
@@ -234,7 +253,7 @@ function DocSheet({ id }: { id: string }) {
         signature: attest.signature,
         rpId: attest.rpId,
       });
-      toast("success", "تم إلحاق التوقيع والبصمة", `${signRole}: ${signName.trim() || doc.number} — تحقق بيومتري فوري موثق`);
+      toast("success", "تم إلحاق التوقيع والبصمة", `${signRole}: ${signName.trim() || doc.number} — رُسمت البصمة في صندوق توقيعه كأنه بَصَّم على الورق`);
       setSignOpen(false);
     } catch (err) {
       toast("error", "تعذر التوثيق البيومتري", err instanceof Error ? err.message : "حاول مرة أخرى");
@@ -320,9 +339,14 @@ function DocSheet({ id }: { id: string }) {
               <p className="text-[10.5px] font-bold text-slate-600">{s.role}</p>
               {sig ? (
                 <div className="flex flex-col items-center gap-0.5 py-1">
-                  <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-100 text-emerald-700">
-                    <Fingerprint size={16} />
-                  </span>
+                  {/* البصمة المُرسمة — كأنه بَصَّم بالحبر على ورقة */}
+                  {fpMap[sig.id] ? (
+                    <img src={fpMap[sig.id]} alt={`بصمة ${sig.role}`} className="fp-img" />
+                  ) : (
+                    <span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+                      <Fingerprint size={18} />
+                    </span>
+                  )}
                   <p className="text-[10.5px] font-bold text-slate-800">{sig.name}</p>
                   <p className="text-[9px] font-bold text-emerald-700">✓ موثق بيومترياً (بصمة)</p>
                   <p className="text-[8px] text-slate-500" dir="ltr">{fmtDate(sig.at, arabic, true)}</p>
@@ -361,7 +385,7 @@ function DocSheet({ id }: { id: string }) {
           <Modal open onClose={() => setSignOpen(false)} title="إلحاق التوقيع وبصمة الإصبع">
             <div className="space-y-4">
               <div className="rounded-xl bg-emerald-50 p-3 text-[11.5px] leading-6 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
-                سيُطلب منك لمس حساس البصمة بالجهاز (أو Face ID) للتحقق من هويتك، ثم يُوثَّق المستند بختم زمني وإثبات تحقق بيومتري مربوط بمحتوى المستند ورقمه. البصمة نفسها لا تُخزَّن ولا تُنقل.
+                سيُطلب منك لمس حساس البصمة بالجهاز (أو Face ID) للتحقق من هويتك، ثم يُوثَّق المستند بختم زمني وإثبات تحقق بيومتري مربوط بمحتوى المستند ورقمه، و<b>تُرسم بصمة إبهامك في صندوق توقيعك داخل المستند</b> كأنك بَصَّمتَ بالحبر على ورقة — البصمة نفسها لا تُخزَّن ولا تُنقل (المتصفحات تمنع الوصول لصورة البصمة الحقيقية حفاظاً على الخصوصية).
               </div>
               <Field label="صفة الموقّع">
                 <Select value={signRole} onChange={(e) => setSignRole(e.target.value)}>
