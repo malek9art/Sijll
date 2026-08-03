@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="0.45" stop-color="#0f9d6e"/>
+      <stop offset="1" stop-color="#053622"/>
+    </linearGradient>
+    <linearGradient id="doc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef7f2"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6ee7b7"/>
+      <stop offset="1" stop-color="#047857"/>
+    </linearGradient>
+    <linearGradient id="ln" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#059669"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <circle cx="118" cy="104" r="150" fill="#ffffff" opacity="0.06"/>
+  <path d="M206 62 h146 l86 86 v252 q0 24 -24 24 h-208 q-24 0 -24 -24 V86 q0 -24 24 -24 Z" fill="url(#doc)"/>
+  <path d="M352 62 l86 86 h-62 q-24 0 -24 -24 Z" fill="url(#fold)"/>
+  <rect x="240" y="196" width="158" height="17" rx="8.5" fill="url(#ln)"/>
+  <rect x="240" y="236" width="158" height="17" rx="8.5" fill="url(#ln)" opacity="0.9"/>
+  <rect x="240" y="276" width="158" height="17" rx="8.5" fill="url(#ln)" opacity="0.8"/>
+  <rect x="240" y="316" width="112" height="17" rx="8.5" fill="url(#ln)" opacity="0.7"/>
+  <path d="M64 252 C 104 420 300 452 446 322" fill="none" stroke="#0b7a4f" stroke-width="58" stroke-linecap="round" opacity="0.55" transform="translate(0 14)"/>
+  <path d="M64 252 C 104 420 300 452 446 322" fill="none" stroke="#ffffff" stroke-width="52" stroke-linecap="round"/>
+  <path d="M300 430 C 356 402 404 356 436 300" fill="none" stroke="#a7f3d0" stroke-width="20" stroke-linecap="round" opacity="0.9"/>
+</svg>

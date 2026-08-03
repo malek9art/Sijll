@@ -1,0 +1,24 @@
+{
+  "name": "سجل — إدارة الحسابات والمديونيات وكشوف الحساب",
+  "short_name": "سجل",
+  "description": "منصة عربية شخصية لإدارة الحسابات والمديونيات، كشوف الحساب الموحدة، المحاسبة، والمستندات مع طباعة احترافية. تطوير Malek Logic.",
+  "dir": "rtl",
+  "lang": "ar",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#032c1f",
+  "theme_color": "#0f9d6e",
+  "categories": ["finance", "business", "productivity"],
+  "icons": [
+    { "src": "./logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "دفتر الحسابات", "url": "./#/ledger" },
+    { "name": "العمليات المالية", "url": "./#/debts" },
+    { "name": "المستندات", "url": "./#/documents" }
+  ]
+}
