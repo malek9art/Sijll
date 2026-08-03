@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { db, journalService, accountingService } from "@/lib/db";
 import { useApp } from "@/lib/store";
-import { useNavigate } from "@/lib/router";
+import { useHashRoute, useNavigate } from "@/lib/router";
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Table, Tabs, Td } from "@/components/ui";
 import { ACCOUNT_TYPES, CURRENCIES, CURRENCY_KEYS, type AccountType, type Currency } from "@/lib/types";
 import { fmtDate, fmtMoney, toDigits, todayISO, uid } from "@/lib/utils";
@@ -16,8 +16,13 @@ import { cn } from "@/utils/cn";
 export function AccountingPage() {
   const { settings, toast } = useApp();
   const navigate = useNavigate();
+  const route = useHashRoute();
   const arabic = settings.arabicDigits;
-  const [tab, setTab] = useState("ledger");
+  /* فتح تبويب محدد عبر الرابط: accounting?tab=reports (من لوحة التحكم والتقارير) */
+  const [tab, setTab] = useState<string>(() => {
+    const t = route.search.get("tab");
+    return t && ["ledger", "journal", "reports"].includes(t) ? t : "ledger";
+  });
   const [accountOpen, setAccountOpen] = useState(false);
   const [entryOpen, setEntryOpen] = useState(false);
   const [viewEntry, setViewEntry] = useState<string | null>(null);
