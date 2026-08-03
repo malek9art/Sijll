@@ -177,6 +177,16 @@ function LedgerStatement({ accountId }: { accountId: string }) {
     return rows.slice(start, start + pageSize);
   }, [rows, page]);
 
+  /* حساب isGroupStart مسبقًا لتجنب تعديل متغير أثناء render */
+  const rowsWithGroupInfo = useMemo(() => {
+    let prev = "";
+    return paginatedRows.map(({ e, bal }) => {
+      const isGroupStart = !!e.groupId && e.groupId !== prev;
+      if (e.groupId) prev = e.groupId;
+      return { e, bal, isGroupStart };
+    });
+  }, [paginatedRows]);
+
   if (!account) {
     return (
       <EmptyState icon={<AlertTriangle size={26} />} title="الحساب غير موجود"
@@ -185,7 +195,6 @@ function LedgerStatement({ accountId }: { accountId: string }) {
   }
 
   const fmt = (v: number) => fmtMoney(v, account.currency, arabic, 2);
-  let prevGroup = "";
 
   return (
     <div className="animate-fade-in">
@@ -245,9 +254,7 @@ function LedgerStatement({ accountId }: { accountId: string }) {
         ) : (
           <>
           <Table headers={["#", "التاريخ", "الجهة المنفذة", "رقم المرجع", "البيان التفصيلي", "دائن", "مدين", "الرصيد المتبقي", ""]} dense>
-            {paginatedRows.map(({ e, bal }, i) => {
-              const isGroupStart = !!e.groupId && e.groupId !== prevGroup;
-              if (e.groupId) prevGroup = e.groupId;
+            {rowsWithGroupInfo.map(({ e, bal, isGroupStart }, i) => {
               return (
                 <Fragment key={e.id}>
                   {isGroupStart && (

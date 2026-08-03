@@ -97,7 +97,16 @@ export function Dashboard() {
   [debts]);
 
   const C = 2 * Math.PI * 42;
-  let acc = 0;
+  const agingArcs = useMemo(() => {
+    if (aging.total <= 0) return [];
+    let offset = 0;
+    return aging.buckets.map((b, i) => {
+      const len = (b / aging.total) * C;
+      const arc = { len, offset, color: aging.colors[i] };
+      offset += len;
+      return arc;
+    });
+  }, [aging, C]);
 
   return (
     <div className="space-y-6">
@@ -162,15 +171,10 @@ export function Dashboard() {
             <div className="relative h-36 w-36">
               <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
                 <circle cx="50" cy="50" r="42" fill="none" strokeWidth="13" className="stroke-slate-100 dark:stroke-slate-800" />
-                {aging.total > 0 && aging.buckets.map((b, i) => {
-                  const len = (b / aging.total) * C;
-                  const el = (
-                    <circle key={i} cx="50" cy="50" r="42" fill="none" strokeWidth="13"
-                      stroke={aging.colors[i]} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-acc} strokeLinecap="butt" />
-                  );
-                  acc += len;
-                  return el;
-                })}
+                {agingArcs.map((arc, i) => (
+                  <circle key={i} cx="50" cy="50" r="42" fill="none" strokeWidth="13"
+                    stroke={arc.color} strokeDasharray={`${arc.len} ${C - arc.len}`} strokeDashoffset={-arc.offset} strokeLinecap="butt" />
+                ))}
               </svg>
               <div className="absolute inset-0 grid place-items-center">
                 <div className="text-center">
