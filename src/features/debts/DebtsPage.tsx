@@ -1,5 +1,5 @@
 /* ====== العمليات المالية (منطق محاسبي) ====== */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   Plus, Search, Printer, Trash2, HandCoins, ArrowRight, CircleCheck, Ban, MessageCircle,
@@ -24,9 +24,9 @@ export function DebtsPage() {
   const { settings, toast } = useApp();
   const arabic = settings.arabicDigits;
 
-  const debts = useLiveQuery(() => db.debts.orderBy("createdAt").reverse().toArray(), []) || [];
-  const payments = useLiveQuery(() => db.payments.toArray(), []) || [];
-  const parties = useLiveQuery(() => db.parties.toArray(), []) || [];
+  const debts = useLiveQuery(() => db.debts.orderBy("createdAt").reverse().toArray()) || [];
+  const payments = useLiveQuery(() => db.payments.toArray()) || [];
+  const parties = useLiveQuery(() => db.parties.toArray()) || [];
 
   const selectedId = route.segments[1];
   const q = route.search.get("q") || "";
@@ -37,6 +37,21 @@ export function DebtsPage() {
   const [paymentFor, setPaymentFor] = useState<Debt | null>(null);
   const [deleteFor, setDeleteFor] = useState<Debt | null>(null);
   const [settleFor, setSettleFor] = useState<Debt | null>(null);
+  const [searchInput, setSearchInput] = useState(q);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
+  /* debounce للبحث — 300ms */
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(route.search);
+      if (searchInput) params.set("q", searchInput);
+      else params.delete("q");
+      const newHash = `#/debts?${params.toString()}`;
+      if (window.location.hash !== newHash) window.location.hash = newHash;
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const partyMap = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
   const paidMap = useMemo(() => {
@@ -60,6 +75,12 @@ export function DebtsPage() {
         );
       });
   }, [debts, q, typeFilter, statusFilter, partyMap]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page]);
 
   const totals = useMemo(() => {
     let recv = 0, pay = 0, open = 0;
@@ -122,16 +143,10 @@ export function DebtsPage() {
           <div className="relative min-w-52 flex-1">
             <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <Input
-              defaultValue={q}
+              value={searchInput}
               placeholder="بحث بالرقم أو الطرف أو السبب..."
               className="pr-9"
-              onChange={(e) => {
-                const t = e.target.value;
-                const params = new URLSearchParams(route.search);
-                if (t) params.set("q", t);
-                else params.delete("q");
-                window.location.hash = `#/debts?${params.toString()}`;
-              }}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
           <Select className="w-40" value={typeFilter} onChange={(e) => {
@@ -168,7 +183,7 @@ export function DebtsPage() {
       ) : (
         <Card className="overflow-hidden">
           <Table headers={["رقم العملية", "الطرف", "الاتجاه", "المبلغ", "المسدد", "المتبقي", "تاريخ العملية", "الحالة", ""]}>
-            {filtered.map((d) => {
+            {paginated.map((d) => {
               const paid = paidMap.get(d.id) || 0;
               const remaining = d.amount - paid;
               const pct = (paid / d.amount) * 100;
@@ -206,13 +221,27 @@ export function DebtsPage() {
                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <button title="كشف وطباعة" onClick={() => navigate(`print/debt/${d.id}`)} className="rounded-lg p-2 text-slate-400 hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-slate-800 cursor-pointer"><Printer size={15} /></button>
                       <button title="تسجيل دفعة" onClick={() => setPaymentFor(d)} disabled={d.status === "settled" || d.status === "cancelled"} className="rounded-lg p-2 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"><Banknote size={15} /></button>
-                      <button title="حذف" onClick={() => setDeleteFor(d)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={15} /></button>
+                      <button aria-label="حذف" title="حذف" onClick={() => setDeleteFor(d)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={15} /></button>
                     </div>
                   </Td>
                 </tr>
               );
             })}
           </Table>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+              <p className="text-[12px] text-slate-500 dark:text-slate-400">
+                عرض {toDigits((page - 1) * pageSize + 1, arabic)}–{toDigits(Math.min(page * pageSize, filtered.length), arabic)} من {toDigits(filtered.length, arabic)} عملية
+              </p>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← السابق</Button>
+                <span className="min-w-[80px] text-center text-[13px] font-bold text-slate-700 dark:text-slate-200">
+                  {toDigits(page, arabic)} / {toDigits(totalPages, arabic)}
+                </span>
+                <Button size="sm" variant="ghost" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>التالي →</Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
@@ -260,21 +289,12 @@ export function DebtsPage() {
       )}
 
       {deleteFor && (
-        <Modal open onClose={() => setDeleteFor(null)} title="حذف الذمة">
-          <div className="space-y-4">
-            <p className="text-sm leading-7 text-slate-600 dark:text-slate-300">
-              سيتم حذف الذمة <b>{toDigits(deleteFor.number, arabic)}</b> وجميع مدفوعاتها نهائياً. لا يمكن التراجع عن هذا الإجراء.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setDeleteFor(null)}>إلغاء</Button>
-              <Button variant="danger" onClick={async () => {
-                await debtsService.remove(deleteFor.id);
-                setDeleteFor(null);
-                toast("info", "تم حذف الذمة");
-              }}><Trash2 size={15} /> حذف نهائي</Button>
-            </div>
-          </div>
-        </Modal>
+        <DeleteDebtModal
+          debt={deleteFor}
+          payments={payments.filter((p) => p.debtId === deleteFor.id)}
+          onClose={() => setDeleteFor(null)}
+          onDeleted={() => { setDeleteFor(null); toast("info", "تم حذف الذمة"); }}
+        />
       )}
     </div>
   );
@@ -519,5 +539,60 @@ function DebtDetail({ debt, party, pays, totalPaid, onBack, onAddPayment, onSett
         )}
       </Card>
     </div>
+  );
+}
+
+/* ====== Modal حذف آمن مع تأكيد مزدوج ====== */
+function DeleteDebtModal({ debt, payments, onClose, onDeleted }: {
+  debt: Debt; payments: Payment[]; onClose: () => void; onDeleted: () => void;
+}) {
+  const { settings, toast } = useApp();
+  const arabic = settings.arabicDigits;
+  const [confirm, setConfirm] = useState("");
+  const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+
+  return (
+    <Modal open onClose={onClose} title="حذف الذمة">
+      <div className="space-y-4">
+        <div className="rounded-xl bg-rose-50 p-4 dark:bg-rose-500/10">
+          <p className="text-sm font-bold text-rose-700 dark:text-rose-300">⚠️ تحذير: عملية لا يمكن التراجع عنها</p>
+          <p className="mt-2 text-[13px] leading-7 text-rose-600 dark:text-rose-400">
+            سيتم حذف الذمة <b>{toDigits(debt.number, arabic)}</b> بشكل نهائي مع:
+          </p>
+          <ul className="mt-2 space-y-1 text-[13px] text-rose-600 dark:text-rose-400">
+            <li>• <b>{toDigits(payments.length, arabic)}</b> دفعة مسجلة بإجمالي <b>{fmtMoney(totalPaid, debt.currency, arabic)}</b></li>
+            <li>• جميع قيود اليومية المرتبطة</li>
+            <li>• سجل النشاط الخاص بهذه العملية</li>
+          </ul>
+        </div>
+        <div>
+          <p className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">
+            للتأكيد، اكتب رقم العملية <b dir="ltr">{debt.number}</b> أدناه:
+          </p>
+          <Input
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder={debt.number}
+            dir="ltr"
+            className="mt-2"
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>إلغاء</Button>
+          <Button
+            variant="danger"
+            disabled={confirm !== debt.number}
+            onClick={async () => {
+              try {
+                await debtsService.remove(debt.id);
+                onDeleted();
+              } catch {
+                toast("error", "تعذر حذف الذمة");
+              }
+            }}
+          ><Trash2 size={15} /> حذف نهائي</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

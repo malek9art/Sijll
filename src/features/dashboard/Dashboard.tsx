@@ -1,7 +1,6 @@
 /* ====== لوحة التحكم ====== */
 import { useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { motion } from "framer-motion";
 import {
   HandCoins, Wallet, FileText, Plus, TrendingUp, Scale, Layers,
   Landmark, ReceiptText, NotebookPen, Printer, MessageCircle,
@@ -20,23 +19,25 @@ export function Dashboard() {
   const { settings } = useApp();
   const navigate = useNavigate();
 
-  const debts = useLiveQuery(() => db.debts.toArray(), []) || [];
-  const payments = useLiveQuery(() => db.payments.toArray(), []) || [];
-  const docs = useLiveQuery(() => db.documents.toArray(), []) || [];
-  const logs = useLiveQuery(() => db.auditLogs.orderBy("at").reverse().limit(8).toArray(), []) || [];
-  const ledgerAccounts = useLiveQuery(() => db.ledgerAccounts.toArray(), []) || [];
-  const ledgerEntries = useLiveQuery(() => db.ledgerEntries.toArray(), []) || [];
+  const debts = useLiveQuery(() => db.debts.toArray()) || [];
+  const payments = useLiveQuery(() => db.payments.toArray()) || [];
+  const docs = useLiveQuery(() => db.documents.toArray()) || [];
+  const logs = useLiveQuery(() => db.auditLogs.orderBy("at").reverse().limit(8).toArray()) || [];
+  const ledgerAccounts = useLiveQuery(() => db.ledgerAccounts.toArray()) || [];
+  /* حساب أرصدة الدفتر مباشرة في الاستعلام — بدلاً من تحميل كل العمليات */
+  const ledgerBalances = useLiveQuery(async () => {
+    const accounts = await db.ledgerAccounts.toArray();
+    return Promise.all(accounts.map(async (a) => {
+      const entries = await db.ledgerEntries.where("accountId").equals(a.id).toArray();
+      const credit = entries.reduce((s, e) => s + e.credit, 0);
+      const debit = entries.reduce((s, e) => s + e.debit, 0);
+      return { account: a, count: entries.length, balance: credit - debit };
+    }));
+  }, []) || [];
 
   const arabic = settings.arabicDigits;
   const base = settings.baseCurrency;
   const rates = settings.exchangeRates;
-
-  const ledgerBalances = useMemo(() => ledgerAccounts.map((a) => {
-    const es = ledgerEntries.filter((e) => e.accountId === a.id);
-    const credit = es.reduce((s, e) => s + e.credit, 0);
-    const debit = es.reduce((s, e) => s + e.debit, 0);
-    return { account: a, count: es.length, balance: credit - debit };
-  }), [ledgerAccounts, ledgerEntries]);
 
   const stats = useMemo(() => {
     const paidMap = new Map<string, number>();
@@ -96,12 +97,21 @@ export function Dashboard() {
   [debts]);
 
   const C = 2 * Math.PI * 42;
-  let acc = 0;
+  const agingArcs = useMemo(() => {
+    if (aging.total <= 0) return [];
+    let offset = 0;
+    return aging.buckets.map((b, i) => {
+      const len = (b / aging.total) * C;
+      const arc = { len, offset, color: aging.colors[i] };
+      offset += len;
+      return arc;
+    });
+  }, [aging, C]);
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-2xl bg-gradient-to-l from-brand-800 via-brand-700 to-emerald-700 p-6 text-white shadow-lg shadow-brand-800/20 sm:p-8">
+      <div
+        className="relative overflow-hidden rounded-2xl bg-gradient-to-l from-brand-800 via-brand-700 to-emerald-700 p-6 text-white shadow-lg shadow-brand-800/20 sm:p-8 animate-fade-up">
         <div className="absolute -left-10 -top-16 h-52 w-52 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-20 left-24 h-40 w-40 rounded-full bg-amber-400/20 blur-2xl" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
@@ -117,7 +127,7 @@ export function Dashboard() {
             <Button size="sm" className="bg-white/15 hover:bg-white/25 text-white" onClick={() => navigate("ledger")}><NotebookPen size={15} /> دفتر الحسابات</Button>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="العمليات الدائنة (لنا)" value={fmtMoney(stats.receivable, base, arabic)} sub={`${toDigits(debts.filter((d) => d.type === "receivable" && (d.status === "active" || d.status === "partial")).length, arabic)} عملية مفتوحة`} icon={<HandCoins size={20} />} tone="teal" onClick={() => navigate("debts?type=receivable")} />
@@ -143,10 +153,9 @@ export function Dashboard() {
                 <span className="text-[10px] font-bold text-slate-400 opacity-0 transition group-hover:opacity-100">
                   {fmtMoney(m.total, base, arabic)}
                 </span>
-                <motion.div
-                  initial={{ height: 0 }} animate={{ height: `${Math.max(4, (m.total / chart.max) * 100)}%` }}
-                  transition={{ delay: i * 0.06, duration: 0.5, ease: "easeOut" }}
-                  className={cn("w-full max-w-12 rounded-t-lg transition-colors", m.total > 0 ? "bg-gradient-to-t from-brand-700 to-brand-400 group-hover:from-brand-800 group-hover:to-brand-300" : "bg-slate-100 dark:bg-slate-800")}
+                <div
+                  style={{ height: `${Math.max(4, (m.total / chart.max) * 100)}%`, transitionDelay: `${i * 60}ms` }}
+                  className={cn("w-full max-w-12 rounded-t-lg transition-all duration-500 ease-out", m.total > 0 ? "bg-gradient-to-t from-brand-700 to-brand-400 group-hover:from-brand-800 group-hover:to-brand-300" : "bg-slate-100 dark:bg-slate-800")}
                   title={fmtMoney(m.total, base, arabic)}
                 />
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{m.label}</span>
@@ -162,15 +171,10 @@ export function Dashboard() {
             <div className="relative h-36 w-36">
               <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
                 <circle cx="50" cy="50" r="42" fill="none" strokeWidth="13" className="stroke-slate-100 dark:stroke-slate-800" />
-                {aging.total > 0 && aging.buckets.map((b, i) => {
-                  const len = (b / aging.total) * C;
-                  const el = (
-                    <circle key={i} cx="50" cy="50" r="42" fill="none" strokeWidth="13"
-                      stroke={aging.colors[i]} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-acc} strokeLinecap="butt" />
-                  );
-                  acc += len;
-                  return el;
-                })}
+                {agingArcs.map((arc, i) => (
+                  <circle key={i} cx="50" cy="50" r="42" fill="none" strokeWidth="13"
+                    stroke={arc.color} strokeDasharray={`${arc.len} ${C - arc.len}`} strokeDashoffset={-arc.offset} strokeLinecap="butt" />
+                ))}
               </svg>
               <div className="absolute inset-0 grid place-items-center">
                 <div className="text-center">
@@ -231,7 +235,7 @@ export function Dashboard() {
             <h3 className="font-bold text-slate-900 dark:text-white">آخر العمليات المسجلة</h3>
           </div>
           {latest.length === 0 ? (
-            <EmptyState icon={<Layers size={26} />} title="لا توجد عمليات بعد" />
+            <EmptyState icon={<Layers size={26} />} title="لا توجد عمليات بعد" description="ابدأ بتسجيل أول عملية مالية لتتبع حساباتك" action={<Button size="sm" onClick={() => navigate("debts")}><HandCoins size={14} /> تسجيل عملية</Button>} />
           ) : (
             <div className="space-y-3">
               {latest.map((d) => {
@@ -261,7 +265,7 @@ export function Dashboard() {
             <h3 className="font-bold text-slate-900 dark:text-white">آخر المدفوعات</h3>
           </div>
           {payments.length === 0 ? (
-            <EmptyState icon={<Wallet size={26} />} title="لا توجد مدفوعات بعد" />
+            <EmptyState icon={<Wallet size={26} />} title="لا توجد مدفوعات بعد" description="سجّل أول دفعة على عملية مفتوحة لبدء التحصيل" />
           ) : (
             <div className="space-y-2.5">
               {[...payments].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map((p) => {
@@ -289,7 +293,7 @@ export function Dashboard() {
             <h3 className="font-bold text-slate-900 dark:text-white">سجل النشاط</h3>
           </div>
           {logs.length === 0 ? (
-            <EmptyState icon={<FileText size={26} />} title="لا نشاط بعد" />
+            <EmptyState icon={<FileText size={26} />} title="لا نشاط بعد" description="سيظهر هنا سجل بجميع العمليات التي تقوم بها" />
           ) : (
             <div className="relative space-y-4 before:absolute before:right-[5px] before:top-1 before:bottom-1 before:w-px before:bg-slate-200 dark:before:bg-slate-700">
               {logs.map((l) => (

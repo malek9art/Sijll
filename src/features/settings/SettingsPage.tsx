@@ -14,7 +14,7 @@ import {
 } from "@/lib/drive";
 import { isBiometricAvailable, registerBiometric } from "@/lib/biometric";
 import { CURRENCIES, CURRENCY_KEYS, type AppSettings, type Currency } from "@/lib/types";
-import { decryptJSON, downloadJSON, fmtDate, hashCode, readFileText, todayISO } from "@/lib/utils";
+import { decryptJSON, downloadJSON, fmtDate, hashPin, readFileText, todayISO } from "@/lib/utils";
 
 function Section({ icon, title, desc, children }: { icon: React.ReactNode; title: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -42,8 +42,19 @@ export function SettingsPage() {
   const [resetOpen, setResetOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const arabic = settings.arabicDigits;
+  const [backupBusy, setBackupBusy] = useState<"export" | "import" | null>(null);
 
-  /* Google Drive */
+  /*
+   * Google Drive OAuth Client ID
+   * ─────────────────────────────
+   * ClientId ليس سريًا بطبيعته — هو معرف عام للتطبيق يُضمّن في كود JavaScript.
+   * الأمان الحقيقي يعتمد على:
+   * 1. نطاق الصلاحية المحدود (drive.file — يصل فقط لملفات التطبيق)
+   * 2. موافقة المستخدم في كل مرة (OAuth consent screen)
+   * 3. Authorized JavaScript origins في Google Cloud Console
+   *
+   * تخزينه في IndexedDB مقبول — لا يحتاج تشفير.
+   */
   const [clientIdInput, setClientIdInput] = useState(settings.driveClientId || "");
   const [driveBusy, setDriveBusy] = useState<"idle" | "connect" | "upload" | "list" | "restore">("idle");
   const [driveFiles, setDriveFiles] = useState<DriveBackupFile[]>([]);
@@ -116,12 +127,18 @@ export function SettingsPage() {
   const set = (k: keyof AppSettings, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
   const exportBackup = async () => {
-    const data = await backupService.exportAll();
-    downloadJSON(`sajil-backup-${todayISO()}.json`, data, exportEncrypted, passphrase);
-    toast("success", "تم تصدير النسخة الاحتياطية", exportEncrypted ? "النسخة مشفرة بتشفير AES-256" : "نسخة JSON كاملة");
+    setBackupBusy("export");
+    try {
+      const data = await backupService.exportAll();
+      downloadJSON(`sajil-backup-${todayISO()}.json`, data, exportEncrypted, passphrase);
+      toast("success", "تم تصدير النسخة الاحتياطية", exportEncrypted ? "النسخة مشفرة بتشفير AES-256" : "نسخة JSON كاملة");
+    } finally {
+      setBackupBusy(null);
+    }
   };
 
   const importBackup = async (file: File) => {
+    setBackupBusy("import");
     try {
       const text = await readFileText(file);
       let parsed: Record<string, unknown>;
@@ -137,6 +154,8 @@ export function SettingsPage() {
       toast("success", "تم استيراد النسخة الاحتياطية بنجاح");
     } catch {
       toast("error", "تعذر قراءة الملف", "تأكد من صحة الملف أو عبارة المرور");
+    } finally {
+      setBackupBusy(null);
     }
   };
 
@@ -177,10 +196,10 @@ export function SettingsPage() {
                 <Input value={form.orgAddress} onChange={(e) => set("orgAddress", e.target.value)} />
               </Field>
               <Field label="الهاتف">
-                <Input value={form.orgPhone} onChange={(e) => set("orgPhone", e.target.value)} dir="ltr" />
+                <Input type="tel" value={form.orgPhone} onChange={(e) => set("orgPhone", e.target.value)} dir="ltr" />
               </Field>
               <Field label="البريد الإلكتروني">
-                <Input value={form.orgEmail} onChange={(e) => set("orgEmail", e.target.value)} dir="ltr" />
+                <Input type="email" value={form.orgEmail} onChange={(e) => set("orgEmail", e.target.value)} dir="ltr" />
               </Field>
               {form.profileMode === "org" && (
                 <Field label="الترخيص / السجل" className="sm:col-span-2">
@@ -254,7 +273,7 @@ export function SettingsPage() {
                   </div>
                 </Field>
                 <Button disabled={pin.length < 4} onClick={async () => {
-                  await saveSettings({ pin: hashCode(pin) });
+                  await saveSettings({ pin: await hashPin(pin) });
                   setPin("");
                   toast("success", "تم تفعيل رمز PIN", "استخدم زر القفل في الشريط العلوي");
                 }}><KeyRound size={15} /> تفعيل</Button>
@@ -309,10 +328,14 @@ export function SettingsPage() {
               </Field>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={exportBackup} disabled={exportEncrypted && passphrase.length < 4}>
-                <Download size={15} /> تصدير النسخة الاحتياطية
+              <Button variant="outline" onClick={exportBackup} disabled={(exportEncrypted && passphrase.length < 4) || backupBusy !== null}>
+                {backupBusy === "export" ? <RefreshCw size={15} className="animate-spin" /> : <Download size={15} />}
+                {backupBusy === "export" ? "جارٍ التصدير..." : "تصدير النسخة الاحتياطية"}
               </Button>
-              <Button variant="outline" onClick={() => fileRef.current?.click()}><Upload size={15} /> استيراد نسخة</Button>
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={backupBusy !== null}>
+                {backupBusy === "import" ? <RefreshCw size={15} className="animate-spin" /> : <Upload size={15} />}
+                {backupBusy === "import" ? "جارٍ الاستيراد..." : "استيراد نسخة"}
+              </Button>
               <input ref={fileRef} type="file" accept=".json,.sajil" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importBackup(f); e.target.value = ""; }} />
             </div>
             {!exportEncrypted && (

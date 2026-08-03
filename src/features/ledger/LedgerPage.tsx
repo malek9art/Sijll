@@ -29,8 +29,8 @@ function LedgerList() {
   const { settings, toast } = useApp();
   const navigate = useNavigate();
   const arabic = settings.arabicDigits;
-  const accounts = useLiveQuery(() => db.ledgerAccounts.toArray(), []) || [];
-  const entries = useLiveQuery(() => db.ledgerEntries.toArray(), []) || [];
+  const accounts = useLiveQuery(() => db.ledgerAccounts.toArray()) || [];
+  const entries = useLiveQuery(() => db.ledgerEntries.toArray()) || [];
   const [accountOpen, setAccountOpen] = useState(false);
   const [deleteFor, setDeleteFor] = useState<LedgerAccount | null>(null);
 
@@ -154,6 +154,8 @@ function LedgerStatement({ accountId }: { accountId: string }) {
   const [editEntry, setEditEntry] = useState<LedgerEntry | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<LedgerEntry | null>(null);
   const [deleteAccount, setDeleteAccount] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
 
   const rows = useMemo(() => {
     let bal = 0;
@@ -169,6 +171,22 @@ function LedgerStatement({ accountId }: { accountId: string }) {
     return { credit, debit, balance: credit - debit };
   }, [entries]);
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const paginatedRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [rows, page]);
+
+  /* حساب isGroupStart مسبقًا لتجنب تعديل متغير أثناء render */
+  const rowsWithGroupInfo = useMemo(() => {
+    let prev = "";
+    return paginatedRows.map(({ e, bal }) => {
+      const isGroupStart = !!e.groupId && e.groupId !== prev;
+      if (e.groupId) prev = e.groupId;
+      return { e, bal, isGroupStart };
+    });
+  }, [paginatedRows]);
+
   if (!account) {
     return (
       <EmptyState icon={<AlertTriangle size={26} />} title="الحساب غير موجود"
@@ -177,7 +195,6 @@ function LedgerStatement({ accountId }: { accountId: string }) {
   }
 
   const fmt = (v: number) => fmtMoney(v, account.currency, arabic, 2);
-  let prevGroup = "";
 
   return (
     <div className="animate-fade-in">
@@ -235,10 +252,9 @@ function LedgerStatement({ accountId }: { accountId: string }) {
             description="أضف أول عملية أو رحّل قيداً محاسبياً مزدوجاً"
             action={<Button onClick={() => setEntryOpen(true)}><Plus size={15} /> إضافة عملية</Button>} />
         ) : (
+          <>
           <Table headers={["#", "التاريخ", "الجهة المنفذة", "رقم المرجع", "البيان التفصيلي", "دائن", "مدين", "الرصيد المتبقي", ""]} dense>
-            {rows.map(({ e, bal }, i) => {
-              const isGroupStart = !!e.groupId && e.groupId !== prevGroup;
-              if (e.groupId) prevGroup = e.groupId;
+            {rowsWithGroupInfo.map(({ e, bal, isGroupStart }, i) => {
               return (
                 <Fragment key={e.id}>
                   {isGroupStart && (
@@ -263,8 +279,8 @@ function LedgerStatement({ accountId }: { accountId: string }) {
                     <Td className="whitespace-nowrap font-black text-slate-900 dark:text-white">{fmt(bal)}</Td>
                     <Td>
                       <div className="flex items-center gap-0.5">
-                        <button title="تعديل" onClick={() => setEditEntry(e)} className="rounded-lg p-1.5 text-slate-300 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-slate-800 cursor-pointer"><PenLine size={14} /></button>
-                        <button title="حذف" onClick={() => setDeleteEntry(e)} className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={14} /></button>
+                        <button aria-label="تعديل" title="تعديل" onClick={() => setEditEntry(e)} className="rounded-lg p-1.5 text-slate-300 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-slate-800 cursor-pointer"><PenLine size={14} /></button>
+                        <button aria-label="حذف" title="حذف" onClick={() => setDeleteEntry(e)} className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={14} /></button>
                       </div>
                     </Td>
                   </tr>
@@ -279,6 +295,21 @@ function LedgerStatement({ accountId }: { accountId: string }) {
               <Td />
             </tr>
           </Table>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+              <p className="text-[12px] text-slate-500 dark:text-slate-400">
+                عرض {toDigits((page - 1) * pageSize + 1, arabic)}–{toDigits(Math.min(page * pageSize, rows.length), arabic)} من {toDigits(rows.length, arabic)} عملية
+              </p>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← السابق</Button>
+                <span className="min-w-[80px] text-center text-[13px] font-bold text-slate-700 dark:text-slate-200">
+                  {toDigits(page, arabic)} / {toDigits(totalPages, arabic)}
+                </span>
+                <Button size="sm" variant="ghost" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>التالي →</Button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </Card>
 

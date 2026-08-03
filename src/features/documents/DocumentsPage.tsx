@@ -20,11 +20,19 @@ export function DocumentsPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [templateEditor, setTemplateEditor] = useState<string | null>(null);
   const [deleteFor, setDeleteFor] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
-  const docs = useLiveQuery(() => documentsService.list(), []) || [];
-  const templates = useLiveQuery(() => db.templates.toArray(), []) || [];
-  const parties = useLiveQuery(() => db.parties.toArray(), []) || [];
+  const docs = useLiveQuery(() => documentsService.list()) || [];
+  const templates = useLiveQuery(() => db.templates.toArray()) || [];
+  const parties = useLiveQuery(() => db.parties.toArray()) || [];
   const partyMap = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
+
+  const totalPages = Math.max(1, Math.ceil(docs.length / pageSize));
+  const paginatedDocs = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return docs.slice(start, start + pageSize);
+  }, [docs, page]);
 
   return (
     <div className="animate-fade-in">
@@ -56,8 +64,9 @@ export function DocumentsPage() {
                 description="أنشئ مستنداً قانونياً من قالب احترافي جاهز"
                 action={<Button onClick={() => setEditorOpen(true)}><Plus size={16} /> مستند جديد</Button>} />
             ) : (
+              <>
               <Table headers={["الرقم", "النوع", "العنوان", "الطرف", "التاريخ", "الحالة", ""]} dense>
-                {docs.map((d) => {
+                {paginatedDocs.map((d) => {
                   const party = d.partyId ? partyMap.get(d.partyId) : undefined;
                   return (
                     <tr key={d.id} className="transition-colors hover:bg-brand-50/40 dark:hover:bg-slate-800/40">
@@ -80,15 +89,30 @@ export function DocumentsPage() {
                           <button title="عرض وطباعة / PDF" onClick={() => navigate(`print/doc/${d.id}`)} className="rounded-lg p-2 text-slate-400 hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-slate-800 cursor-pointer"><Printer size={15} /></button>
                           <button title="مشاركة PDF عبر واتساب" onClick={() => navigate(`print/doc/${d.id}`)} className="rounded-lg p-2 text-slate-400 hover:bg-emerald-50 hover:text-[#25D366] dark:hover:bg-slate-800 cursor-pointer"><MessageCircle size={15} /></button>
                           <button title="تحقق QR" onClick={() => navigate(`verify/${d.number}`)} className="rounded-lg p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-slate-800 cursor-pointer"><QrCode size={15} /></button>
-                          <button title="تعديل" onClick={() => { setEditId(d.id); setEditorOpen(true); }} className="rounded-lg p-2 text-slate-400 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-slate-800 cursor-pointer"><PenLine size={15} /></button>
-                          <button title="نسخ" onClick={async () => { const n = await documentsService.duplicate(d.id); if (n) toast("success", "تم إنشاء نسخة", n.number); }} className="rounded-lg p-2 text-slate-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-slate-800 cursor-pointer"><Copy size={15} /></button>
-                          <button title="حذف" onClick={() => setDeleteFor(d.id)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={15} /></button>
+                          <button aria-label="تعديل" title="تعديل" onClick={() => { setEditId(d.id); setEditorOpen(true); }} className="rounded-lg p-2 text-slate-400 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-slate-800 cursor-pointer"><PenLine size={15} /></button>
+                          <button aria-label="نسخ" title="نسخ" onClick={async () => { const n = await documentsService.duplicate(d.id); if (n) toast("success", "تم إنشاء نسخة", n.number); }} className="rounded-lg p-2 text-slate-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-slate-800 cursor-pointer"><Copy size={15} /></button>
+                          <button aria-label="حذف" title="حذف" onClick={() => setDeleteFor(d.id)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={15} /></button>
                         </div>
                       </Td>
                     </tr>
                   );
                 })}
               </Table>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+                  <p className="text-[12px] text-slate-500 dark:text-slate-400">
+                    عرض {toDigits((page - 1) * pageSize + 1, arabic)}–{toDigits(Math.min(page * pageSize, docs.length), arabic)} من {toDigits(docs.length, arabic)} مستند
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← السابق</Button>
+                    <span className="min-w-[80px] text-center text-[13px] font-bold text-slate-700 dark:text-slate-200">
+                      {toDigits(page, arabic)} / {toDigits(totalPages, arabic)}
+                    </span>
+                    <Button size="sm" variant="ghost" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>التالي →</Button>
+                  </div>
+                </div>
+              )}
+              </>
             )}
           </Card>
         )}

@@ -351,7 +351,7 @@ function AccountSheet({ id }: { id: string }) {
   const { settings } = useApp();
   const arabic = settings.arabicDigits;
   const account = useLiveQuery(() => db.accounts.get(id), [id]);
-  const entries = useLiveQuery(() => db.journalEntries.toArray(), []) || [];
+  const entries = useLiveQuery(() => db.journalEntries.toArray()) || [];
 
   if (!account) return <div className="py-20 text-center">...جارٍ التحميل</div>;
   const lines = entries
@@ -532,10 +532,10 @@ function ReportSheet({ kind, params }: { kind: string; params: URLSearchParams }
 
   /* الأرصدة حتى تاريخ نهاية الفترة — موحّدة بالعملة الأساسية عبر أسعار الصرف */
   const balances = useLiveQuery(() => accountingService.balances(settings.exchangeRates, base, to), [settings.exchangeRates, base, to]) || [];
-  const entries = useLiveQuery(() => db.journalEntries.toArray(), []) || [];
-  const debts = useLiveQuery(() => db.debts.toArray(), []) || [];
-  const payments = useLiveQuery(() => db.payments.toArray(), []) || [];
-  const parties = useLiveQuery(() => db.parties.toArray(), []) || [];
+  const entries = useLiveQuery(() => db.journalEntries.toArray()) || [];
+  const debts = useLiveQuery(() => db.debts.toArray()) || [];
+  const payments = useLiveQuery(() => db.payments.toArray()) || [];
+  const parties = useLiveQuery(() => db.parties.toArray()) || [];
   const party = useLiveQuery(() => (params.get("partyId") ? db.parties.get(params.get("partyId")!) : undefined), [params.get("partyId")]);
   const partyMap = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
 

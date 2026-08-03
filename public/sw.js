@@ -1,5 +1,5 @@
 /* سجل — Service Worker: استراتيجية Offline-First مع تخزين خطوط قوقل */
-const CACHE = "sajil-v2";
+const CACHE = "sajil-v3";
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-512.png", "./favicon.svg", "./logo.svg"];
 
 self.addEventListener("install", (e) => {
@@ -12,6 +12,14 @@ self.addEventListener("activate", (e) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+      .then(() => {
+        /* إشعار كل العملاء بتوفر تحديث جديد */
+        return self.clients.matchAll({ type: "window" }).then((clients) => {
+          for (const client of clients) {
+            client.postMessage({ type: "SAJIL_UPDATE_AVAILABLE" });
+          }
+        });
+      })
   );
 });
 
