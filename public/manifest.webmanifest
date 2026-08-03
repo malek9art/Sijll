@@ -6,6 +6,7 @@
   "lang": "ar",
   "start_url": "./",
   "scope": "./",
+  "id": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#032c1f",
