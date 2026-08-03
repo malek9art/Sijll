@@ -252,7 +252,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
    قواعد الطباعة
    ========================================================== */
 @media print {
-  @page { size: A4 portrait; margin: 8mm 7mm 10mm; }
+  @page { size: A4 portrait; margin: 8mm 7mm 14mm; @bottom-center { content: counter(page) " / " counter(pages); font-size: 9px; color: #64748b; } }
   html, body { background: #ffffff !important; margin: 0 !important; padding: 0 !important; }
   body * { visibility: hidden; }
   .print-root, .print-root * { visibility: visible; }

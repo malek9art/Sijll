@@ -1,6 +1,6 @@
 /* ====== مكتبة المكونات الأساسية — نظام تصميم سجل ====== */
 import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+/* الحركات تعتمد على CSS فقط (لا framer-motion) */
 import { X, Inbox, CheckCircle2, AlertCircle, Info } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { useApp } from "@/lib/store";
@@ -129,34 +129,28 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
 
 /* ===== نافذة منبثقة ===== */
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; wide?: boolean }) {
+  if (!open) return null;
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/50 backdrop-blur-sm p-0 sm:p-6"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ y: 40, opacity: 0, scale: 0.98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 40, opacity: 0, scale: 0.98 }}
-            transition={{ type: "spring", damping: 28, stiffness: 320 }}
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              "w-full rounded-t-3xl sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[92vh] flex flex-col",
-              wide ? "sm:max-w-3xl" : "sm:max-w-lg"
-            )}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">{title}</h3>
-              <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 cursor-pointer">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="overflow-y-auto p-5">{children}</div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/50 backdrop-blur-sm p-0 sm:p-6 animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          "w-full rounded-t-3xl sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[92vh] flex flex-col animate-fade-up",
+          wide ? "sm:max-w-3xl" : "sm:max-w-lg"
+        )}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
+          <h3 className="text-base font-bold text-slate-900 dark:text-white">{title}</h3>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 cursor-pointer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
   );
 }
 
@@ -290,23 +284,81 @@ export function ToastViewport() {
   };
   return (
     <div className="fixed bottom-4 left-4 z-[80] flex w-[min(92vw,380px)] flex-col gap-2">
-      <AnimatePresence>
-        {toasts.map((t) => (
-          <motion.div
-            key={t.id}
-            layout
-            initial={{ opacity: 0, x: -40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
-            className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white/95 p-3.5 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-800/95"
-          >
-            {icons[t.kind]}
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{t.title}</p>
-              {t.message && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t.message}</p>}
-            </div>
-            <button onClick={() => dismissToast(t.id)} className="text-slate-300 hover:text-slate-500 cursor-pointer"><X size={14} /></button>
-          </motion.div>
-        ))}
-      </AnimatePresence>
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white/95 p-3.5 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-800/95 animate-fade-up"
+        >
+          {icons[t.kind]}
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-bold text-slate-800 dark:text-slate-100">{t.title}</p>
+            {t.message && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t.message}</p>}
+          </div>
+          <button onClick={() => dismissToast(t.id)} className="text-slate-300 hover:text-slate-500 cursor-pointer"><X size={14} /></button>
+        </div>
+      ))}
     </div>
+  );
+}
+
+/* ===== Skeleton Loading ===== */
+function SkeletonBar({ className }: { className?: string }) {
+  return <div className={cn("animate-pulse rounded-lg bg-slate-200 dark:bg-slate-700", className)} />;
+}
+
+export function TableSkeleton({ rows = 5, cols = 5 }: { rows?: number; cols?: number }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      <table className="w-full min-w-[640px] text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-800/50">
+            {Array.from({ length: cols }).map((_, i) => (
+              <th key={i} className="px-4 py-3 text-right">
+                <SkeletonBar className="mx-auto h-3 w-20" />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+          {Array.from({ length: rows }).map((_, r) => (
+            <tr key={r}>
+              {Array.from({ length: cols }).map((_, c) => (
+                <td key={c} className="px-4 py-3">
+                  <SkeletonBar className={cn("h-4", c === 0 ? "w-24" : c === cols - 1 ? "w-16" : "w-32")} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function StatCardSkeleton() {
+  return (
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1 space-y-3">
+          <SkeletonBar className="h-3 w-24" />
+          <SkeletonBar className="h-7 w-32" />
+          <SkeletonBar className="h-2.5 w-20" />
+        </div>
+        <SkeletonBar className="h-11 w-11 shrink-0 rounded-xl" />
+      </div>
+    </Card>
+  );
+}
+
+export function CardSkeleton({ lines = 3 }: { lines?: number }) {
+  return (
+    <Card className="p-5">
+      <div className="space-y-3">
+        <SkeletonBar className="h-4 w-40" />
+        {Array.from({ length: lines }).map((_, i) => (
+          <SkeletonBar key={i} className={cn("h-3", i === lines - 1 ? "w-3/4" : "w-full")} />
+        ))}
+      </div>
+    </Card>
   );
 }

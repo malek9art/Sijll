@@ -21,12 +21,21 @@ export function AccountingPage() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [entryOpen, setEntryOpen] = useState(false);
   const [viewEntry, setViewEntry] = useState<string | null>(null);
+  const [deleteEntry, setDeleteEntry] = useState<string | null>(null);
   const [partyReport, setPartyReport] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
-  const accounts = useLiveQuery(() => db.accounts.toArray(), []) || [];
-  const entries = useLiveQuery(() => db.journalEntries.orderBy("date").reverse().toArray(), []) || [];
+  const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
+  const entries = useLiveQuery(() => db.journalEntries.orderBy("date").reverse().toArray()) || [];
   const balances = useLiveQuery(() => accountingService.balances(settings.exchangeRates, settings.baseCurrency), [settings.exchangeRates, settings.baseCurrency]) || [];
-  const parties = useLiveQuery(() => db.parties.toArray(), []) || [];
+  const parties = useLiveQuery(() => db.parties.toArray()) || [];
+
+  const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
+  const paginatedEntries = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return entries.slice(start, start + pageSize);
+  }, [entries, page]);
 
   const totalDebit = balances.reduce((s, b) => s + b.debit + (b.account.type === "asset" || b.account.type === "expense" ? b.opening : 0), 0);
   const totalCredit = balances.reduce((s, b) => s + b.credit + (b.account.type === "liability" || b.account.type === "equity" || b.account.type === "income" ? b.opening : 0), 0);
@@ -116,10 +125,11 @@ export function AccountingPage() {
         {tab === "journal" && (
           <Card className="overflow-hidden">
             {entries.length === 0 ? (
-              <EmptyState icon={<Scale size={28} />} title="لا توجد قيود بعد" action={<Button onClick={() => setEntryOpen(true)}><Plus size={16} /> ترحيل قيد</Button>} />
+              <EmptyState icon={<Scale size={28} />} title="لا توجد قيود بعد" description="رحّل أول قيد يومية مزدوج القيد لبدء المحاسبة" action={<Button onClick={() => setEntryOpen(true)}><Plus size={16} /> ترحيل قيد</Button>} />
             ) : (
+              <>
               <Table headers={["رقم القيد", "التاريخ", "البيان", "عدد الأسطر", "القيمة", ""]} dense>
-                {entries.map((e) => {
+                {paginatedEntries.map((e) => {
                   const total = e.lines.reduce((s, l) => s + l.debit, 0);
                   return (
                     <tr key={e.id} className="transition-colors hover:bg-brand-50/40 dark:hover:bg-slate-800/40">
@@ -130,14 +140,29 @@ export function AccountingPage() {
                       <Td className="font-bold">{fmtMoney(total, e.currency, arabic)}</Td>
                       <Td>
                         <div className="flex items-center gap-1">
-                          <button title="عرض" onClick={() => setViewEntry(e.id)} className="rounded-lg p-2 text-slate-400 hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-slate-800 cursor-pointer"><Eye size={15} /></button>
-                          <button title="حذف" onClick={async () => { await journalService.remove(e.id); toast("info", "تم حذف القيد"); }} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={15} /></button>
+                          <button aria-label="عرض" title="عرض" onClick={() => setViewEntry(e.id)} className="rounded-lg p-2 text-slate-400 hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-slate-800 cursor-pointer"><Eye size={15} /></button>
+                          <button aria-label="حذف" title="حذف" onClick={() => setDeleteEntry(e.id)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-slate-800 cursor-pointer"><Trash2 size={15} /></button>
                         </div>
                       </Td>
                     </tr>
                   );
                 })}
               </Table>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+                  <p className="text-[12px] text-slate-500 dark:text-slate-400">
+                    عرض {toDigits((page - 1) * pageSize + 1, arabic)}–{toDigits(Math.min(page * pageSize, entries.length), arabic)} من {toDigits(entries.length, arabic)} قيد
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← السابق</Button>
+                    <span className="min-w-[80px] text-center text-[13px] font-bold text-slate-700 dark:text-slate-200">
+                      {toDigits(page, arabic)} / {toDigits(totalPages, arabic)}
+                    </span>
+                    <Button size="sm" variant="ghost" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>التالي →</Button>
+                  </div>
+                </div>
+              )}
+              </>
             )}
           </Card>
         )}
@@ -184,6 +209,22 @@ export function AccountingPage() {
           </div>
         </div>
       </Modal>
+
+      {deleteEntry && (
+        <Modal open onClose={() => setDeleteEntry(null)} title="حذف القيد">
+          <p className="text-sm leading-7 text-slate-600 dark:text-slate-300">
+            هل أنت متأكد من حذف هذا القيد نهائياً؟ سيؤثر ذلك على أرصدة الحسابات المرتبطة.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setDeleteEntry(null)}>إلغاء</Button>
+            <Button variant="danger" onClick={async () => {
+              await journalService.remove(deleteEntry);
+              setDeleteEntry(null);
+              toast("info", "تم حذف القيد");
+            }}><Trash2 size={15} /> حذف نهائي</Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

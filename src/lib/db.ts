@@ -24,7 +24,8 @@ export class SajilDB extends Dexie {
 
   constructor() {
     super("sajil-db");
-    this.version(2).stores({
+    /* رقم إصدار Dexie مُوحّد مع schemaVersion في initDB (حاليًا 4) */
+    this.version(4).stores({
       parties: "id, name, type, phone",
       debts: "id, number, type, partyId, status, currency, date, createdAt",
       payments: "id, debtId, date, method, currency",
@@ -45,8 +46,23 @@ export const db = new SajilDB();
 
 export async function initDB(): Promise<void> {
   const row = await db.settings.get("schemaVersion");
-  if ((row?.value as number) !== 4) {
-    /* ترقية المخطط: مسح شامل وإعادة تهيئة بقاعدة نظيفة متوافقة مع الإصدار الجديد */
+  const currentVersion = (row?.value as number) || 0;
+
+  /*
+   * نظام الترقيات التدريجية (Migrations):
+   * ─────────────────────────────────────────
+   * كل إصدار جديد يُضيف migration محدد بدلاً من المسح الشامل.
+   * الإصدار 0→4: ترقية تاريخية — مسح شامل (لمن كانوا على إصدارات أقدم من 4).
+   * الإصدارات 5+: يجب إضافة migration محدد أدناه WITHOUT مسح.
+   *
+   * مثال لإضافة جدول جديد في الإصدار 5:
+   *   if (currentVersion < 5) {
+   *     await db.settings.put({ key: "schemaVersion", value: 5 });
+   *   }
+   */
+
+  if (currentVersion < 4) {
+    /* ترقية من إصدار أقدم من 4: مسح شامل وإعادة تهيئة */
     const tables = [
       db.parties, db.debts, db.payments, db.accounts, db.journalEntries,
       db.templates, db.documents, db.auditLogs, db.notifications, db.settings,
@@ -55,6 +71,13 @@ export async function initDB(): Promise<void> {
     await Promise.all(tables.map((t) => t.clear()));
     await db.settings.put({ key: "schemaVersion", value: 4 });
   }
+
+  /* ── الإصدارات المستقبلية ── */
+  // if (currentVersion < 5) {
+  //   /* migration محدد بدون مسح */
+  //   await db.settings.put({ key: "schemaVersion", value: 5 });
+  // }
+
   await seedIfEmpty();
 }
 
@@ -89,6 +112,22 @@ async function nextNumber(prefix: string, width = 4): Promise<string> {
   const current = ((row?.value as number) || 0) + 1;
   await db.settings.put({ key, value: current });
   return `${prefix}-${String(current).padStart(width, "0")}`;
+}
+
+/* ====== Pagination عام ====== */
+export interface PagedResult<T> { items: T[]; total: number; page: number; pageSize: number; totalPages: number }
+
+export async function listPaged<T>(
+  query: () => Promise<T[]>,
+  page: number,
+  pageSize: number,
+): Promise<PagedResult<T>> {
+  const all = await query();
+  const total = all.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.max(1, Math.min(page, totalPages));
+  const start = (safePage - 1) * pageSize;
+  return { items: all.slice(start, start + pageSize), total, page: safePage, pageSize, totalPages };
 }
 
 /* ====== خدمة العمليات المالية (الديون) ====== */
@@ -328,21 +367,26 @@ export const documentsService = {
 /* ====== النسخ الاحتياطي ====== */
 export const backupService = {
   async exportAll(): Promise<Record<string, unknown>> {
-    const [parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings] = await Promise.all([
+    const [parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings, ledgerAccounts, ledgerEntries] = await Promise.all([
       db.parties.toArray(), db.debts.toArray(), db.payments.toArray(), db.accounts.toArray(),
       db.journalEntries.toArray(), db.templates.toArray(), db.documents.toArray(), db.auditLogs.toArray(),
-      db.notifications.toArray(), db.settings.toArray(),
+      db.notifications.toArray(), db.settings.toArray(), db.ledgerAccounts.toArray(), db.ledgerEntries.toArray(),
     ]);
-    return { version: 1, parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings };
+    return { version: 2, parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings, ledgerAccounts, ledgerEntries };
   },
   async importAll(data: Record<string, unknown>, replace = false): Promise<void> {
     const t = data as Record<string, unknown[]>;
-    await db.transaction("rw", [db.parties, db.debts, db.payments, db.accounts, db.journalEntries, db.templates, db.documents, db.auditLogs, db.notifications, db.settings], async () => {
+    await db.transaction("rw", [db.parties, db.debts, db.payments, db.accounts, db.journalEntries, db.templates, db.documents, db.auditLogs, db.notifications, db.settings, db.ledgerAccounts, db.ledgerEntries], async () => {
       if (replace) {
-        await Promise.all([
+        const clears: Promise<unknown>[] = [
           db.parties.clear(), db.debts.clear(), db.payments.clear(), db.accounts.clear(),
           db.journalEntries.clear(), db.templates.clear(), db.documents.clear(), db.auditLogs.clear(), db.notifications.clear(),
-        ]);
+        ];
+        /* امسح جداول الدفتر فقط إن كانت النسخة الاحتياطية تحتويها —
+           لتجنب فقدان بيانات الدفتر عند استعادة نسخة قديمة (قبل v2) لا تتضمنها. */
+        if (t.ledgerAccounts !== undefined) clears.push(db.ledgerAccounts.clear());
+        if (t.ledgerEntries !== undefined) clears.push(db.ledgerEntries.clear());
+        await Promise.all(clears);
       }
       if (t.parties) await db.parties.bulkPut(t.parties as Party[]);
       if (t.debts) await db.debts.bulkPut(t.debts as Debt[]);
@@ -354,6 +398,8 @@ export const backupService = {
       if (t.auditLogs) await db.auditLogs.bulkPut(t.auditLogs as AuditLog[]);
       if (t.notifications) await db.notifications.bulkPut(t.notifications as AppNotification[]);
       if (t.settings) await db.settings.bulkPut(t.settings as { key: string; value: unknown }[]);
+      if (t.ledgerAccounts) await db.ledgerAccounts.bulkPut(t.ledgerAccounts as LedgerAccount[]);
+      if (t.ledgerEntries) await db.ledgerEntries.bulkPut(t.ledgerEntries as LedgerEntry[]);
     });
   },
 };

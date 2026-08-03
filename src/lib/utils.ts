@@ -218,6 +218,65 @@ export function hashCode(input: string): string {
   return (h >>> 0).toString(36);
 }
 
+/* ====== تشفير PIN آمن عبر PBKDF2-SHA256 ======
+ * يُنتج hash بصيغة: "pbkdf2$<iterations>$<salt_base64>$<hash_base64>"
+ *salt عشوائي 16 بايت + 100,000 تكرار — يستغرق ~50-100ms لكل محاولة (مقاوم لـ brute-force).
+ */
+const PIN_ITERATIONS = 100_000;
+const PIN_SALT_LEN = 16;
+const PIN_KEY_LEN = 256;
+
+function u8ToB64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+function b64ToU8(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** تشفير PIN جديد (PBKDF2-SHA256) */
+export async function hashPin(pin: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(PIN_SALT_LEN));
+  const material = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PIN_ITERATIONS, hash: "SHA-256" },
+    material, PIN_KEY_LEN,
+  );
+  return `pbkdf2$${PIN_ITERATIONS}$${u8ToB64(salt)}$${u8ToB64(new Uint8Array(bits))}`;
+}
+
+/**
+ * التحقق من PIN ضد hash مخزّن.
+ * يدعم التنسيقين: PBKDF2 الجديد (`pbkdf2$...`) وhashCode القديم (للتوافق العكسي).
+ * يُرجع `{ ok, needsUpgrade }` — `needsUpgrade = true` يعني أن الـ hash بتنسيق قديم ويجب إعادة تشفيره.
+ */
+export async function verifyPin(pin: string, stored: string): Promise<{ ok: boolean; needsUpgrade: boolean }> {
+  if (stored.startsWith("pbkdf2$")) {
+    const parts = stored.split("$");
+    if (parts.length !== 4) return { ok: false, needsUpgrade: false };
+    const iterations = parseInt(parts[1], 10);
+    const salt = b64ToU8(parts[2]);
+    const expected = parts[3];
+    const material = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+      material, PIN_KEY_LEN,
+    );
+    const computed = u8ToB64(new Uint8Array(bits));
+    /* مقارنة ثابتة الوقت (timing-safe) */
+    if (computed.length !== expected.length) return { ok: false, needsUpgrade: false };
+    let diff = 0;
+    for (let i = 0; i < computed.length; i++) diff |= computed.charCodeAt(i) ^ expected.charCodeAt(i);
+    return { ok: diff === 0, needsUpgrade: false };
+  }
+  /* توافق عكسي: hashCode القديم */
+  return { ok: hashCode(pin) === stored, needsUpgrade: true };
+}
+
 /* ===== عناصر نائبة ===== */
 export const PLACEHOLDERS: { key: string; label: string }[] = [
   { key: "org_name", label: "اسم المنشأة" },

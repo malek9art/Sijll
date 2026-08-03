@@ -1,5 +1,7 @@
 # سجل (SAJIL) — منصة الحسابات الشخصية
 
+[![Deploy to GitHub Pages](https://github.com/malek9art/Sijll/actions/workflows/deploy.yml/badge.svg)](https://github.com/malek9art/Sijll/actions/workflows/deploy.yml)
+
 <p align="center">
   <strong>منصة عربية احترافية لإدارة الحسابات والمديونيات · كشوف الحساب الموحدة · المحاسبة · المستندات · الطباعة الاحترافية A4</strong>
 </p>

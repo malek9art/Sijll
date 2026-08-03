@@ -1,7 +1,7 @@
 /* ====== الهيكل العام: شريط جانبي + شريط علوي ====== */
 import { useEffect, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { motion, AnimatePresence } from "framer-motion";
+/* الحركات تعتمد على CSS فقط (لا framer-motion) */
 import {
   LayoutDashboard, HandCoins, NotebookPen, Scale, FileText, Settings, Bell, Sun, Moon, Lock, Menu, X,
   Search, CheckCheck, ShieldCheck, FileSpreadsheet, WifiOff,
@@ -36,7 +36,7 @@ function NavItem({ to, label, icon: Icon, active, onNavigate }: { to: string; la
     >
       <Icon size={19} className={cn("shrink-0", active ? "text-white" : "text-slate-400 group-hover:text-brand-600 dark:group-hover:text-brand-300")} />
       {label}
-      {active && <motion.span layoutId="nav-dot" className="absolute left-2.5 h-1.5 w-1.5 rounded-full bg-amber-300" />}
+      {active && <span className="absolute left-2.5 h-1.5 w-1.5 rounded-full bg-amber-300 animate-fade-in" />}
     </Link>
   );
 }
@@ -90,14 +90,12 @@ function NotificationsBell() {
           </span>
         )}
       </button>
-      <AnimatePresence>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <motion.div
-              initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-              className="absolute left-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900"
-            >
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="absolute left-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900 animate-fade-up"
+          >
               <div className="flex items-center justify-between px-3 py-2">
                 <p className="text-sm font-bold text-slate-800 dark:text-white">التنبيهات</p>
                 <button
@@ -123,10 +121,9 @@ function NotificationsBell() {
                   </div>
                 ))}
               </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -160,29 +157,30 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      {/* رابط تخطي إلى المحتوى — لإمكانية الوصول */}
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:right-2 focus:z-[999] focus:rounded-lg focus:bg-brand-700 focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-white focus:shadow-lg">
+        تخطي إلى المحتوى
+      </a>
       {/* الشريط الجانبي — سطح المكتب */}
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-l border-slate-200/80 bg-white lg:block dark:border-slate-800 dark:bg-slate-900">
         <SidebarContent />
       </aside>
 
       {/* الشريط الجانبي — الجوال */}
-      <AnimatePresence>
-        {mobileNav && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[60] bg-slate-950/50 backdrop-blur-sm lg:hidden" onClick={() => setMobileNav(false)} />
-            <motion.aside
-              initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed inset-y-0 right-0 z-[61] w-72 bg-white shadow-2xl dark:bg-slate-900 lg:hidden"
-            >
-              <button onClick={() => setMobileNav(false)} className="absolute left-3 top-4 rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
-                <X size={18} />
-              </button>
-              <SidebarContent onNavigate={() => setMobileNav(false)} />
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
+      {mobileNav && (
+        <>
+          <div
+            className="fixed inset-0 z-[60] bg-slate-950/50 backdrop-blur-sm lg:hidden animate-fade-in" onClick={() => setMobileNav(false)} />
+          <aside
+            className="fixed inset-y-0 right-0 z-[61] w-72 bg-white shadow-2xl dark:bg-slate-900 lg:hidden animate-fade-in"
+          >
+            <button onClick={() => setMobileNav(false)} className="absolute left-3 top-4 rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+              <X size={18} />
+            </button>
+            <SidebarContent onNavigate={() => setMobileNav(false)} />
+          </aside>
+        </>
+      )}
 
       {/* المحتوى */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -201,19 +199,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               />
             </form>
             <div className="ms-auto flex items-center gap-2">
-              <AnimatePresence>
-                {!online && (
-                  <motion.span
-                    initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                    className="hidden items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-[11px] font-bold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30 sm:inline-flex"
-                  >
-                    <WifiOff size={12} /> دون اتصال — البيانات محفوظة محلياً
-                  </motion.span>
-                )}
-              </AnimatePresence>
+              {!online && (
+                <span
+                  className="hidden items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-[11px] font-bold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30 sm:inline-flex animate-fade-in"
+                >
+                  <WifiOff size={12} /> دون اتصال — البيانات محفوظة محلياً
+                </span>
+              )}
               <NotificationsBell />
               <button
                 onClick={toggleTheme}
+                aria-label="تبديل المظهر"
                 title="تبديل المظهر"
                 className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-amber-300 hover:text-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
               >
@@ -224,6 +220,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   if (settings.pin) lock();
                   else toast("info", "قفل التطبيق", "فعّل رمز PIN من الإعدادات لاستخدام قفل الجلسة");
                 }}
+                aria-label="قفل الجلسة"
                 title="قفل الجلسة"
                 className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-rose-300 hover:text-rose-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 cursor-pointer"
               >
@@ -237,7 +234,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main id="main-content" className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
 
         <footer className="border-t border-slate-200/70 px-6 py-4 text-center text-[11px] text-slate-400 dark:border-slate-800">
           سجل © {toDigits(new Date().getFullYear(), true)} — منصة عربية شخصية لإدارة الحسابات والمديونيات والمستندات · <FileSpreadsheet size={11} className="inline" /> Offline-First
