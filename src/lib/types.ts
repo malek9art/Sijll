@@ -212,6 +212,32 @@ export interface DocParty {
   phone?: string;
 }
 
+/* ====== التوقيع البيومتري الموثق للمستندات ======
+ * عبر WebAuthn: تبقى البصمة داخل حساس الجهاز ولا تُخزَّن أو تُنقل أبداً.
+ * ما يُحفظ هو إثبات تحقق بيومتري فوري (assertion) مربوط بمحتوى المستند
+ * عبر challenge مشتق من بصمة المستند الرقمية (digest) + ختم زمني.
+ */
+export interface DocSignature {
+  id: string;
+  role: string;
+  name: string;
+  method: "biometric" | "manual";
+  /** ختم زمني ISO للتوثيق */
+  at: string;
+  /** معرّف الاعتماد (b64) */
+  credentialId?: string;
+  /** التحدي المُرسل (b64) — مشتق من بصمة المستند */
+  challenge?: string;
+  /** clientDataJSON (b64) */
+  clientDataJSON?: string;
+  /** authenticatorData (b64) */
+  authenticatorData?: string;
+  /** توقيع الاعتماد (b64) */
+  signature?: string;
+  /** معرف الجهة المعتمدة */
+  rpId?: string;
+}
+
 export interface LegalDoc {
   id: string;
   number: string;
@@ -228,6 +254,8 @@ export interface LegalDoc {
   reason?: string;
   body: string; // نص القالب مع العناصر النائبة
   parties: DocParty[];
+  /** التواقيع المُلحقة (بيومترية عبر حساس البصمة أو يدوية) */
+  signatures?: DocSignature[];
   status: "draft" | "final";
   history: { at: string; action: string }[];
   createdAt: string;
@@ -272,6 +300,22 @@ export interface AppSettings {
   driveClientId?: string;
   syncEnabled: boolean;
   exchangeRates: Record<string, number>;
+  /* ====== الحذف التلقائي وسياسة الاحتفاظ ====== */
+  /** تفعيل التنظيف التلقائي للبيانات عند تشغيل التطبيق */
+  autoCleanupEnabled: boolean;
+  /** الاحتفاظ بسجل التدقيق والتنبيهات (أيام) — ما هو أقدم يُحذف تلقائياً */
+  cleanupAuditDays: number;
+  /** حذف العمليات الملغاة ودفعاتها بعد (أشهر) */
+  cleanupCancelledMonths: number;
+  /* ====== النسخ الاحتياطي التلقائي ====== */
+  /** إنشاء نسخة احتياطية محلية تلقائية (داخل الجهاز) عند كل تشغيل */
+  localBackupEnabled: boolean;
+  /** عدد النسخ الاحتياطية المحلية المحفوظة (الأقدم تُحذف تلقائياً) */
+  localBackupKeep: number;
+  /** عدد النسخ المحفوظة على Google Drive (الأقدم تُحذف تلقائياً) */
+  driveBackupKeep: number;
+  /** آخر نسخة احتياطية تلقائية ناجحة (ISO) */
+  lastAutoBackupAt?: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -287,4 +331,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: "light",
   syncEnabled: false,
   exchangeRates: { YER: 0.00235, SAR: 1, USD: 3.75, EUR: 4.1 },
+  autoCleanupEnabled: true,
+  cleanupAuditDays: 180,
+  cleanupCancelledMonths: 12,
+  localBackupEnabled: true,
+  localBackupKeep: 6,
+  driveBackupKeep: 20,
 };
+
+/* ====== نسخة احتياطية محلية تلقائية ====== */
+export interface LocalBackup {
+  id: string;
+  at: string;
+  /** حجم البيانات (بايت) */
+  size: number;
+  /** نسخة JSON كاملة من التصدير */
+  data: Record<string, unknown>;
+}

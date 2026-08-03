@@ -277,6 +277,86 @@ export async function verifyPin(pin: string, stored: string): Promise<{ ok: bool
   return { ok: hashCode(pin) === stored, needsUpgrade: true };
 }
 
+/* ====== التحقق الرقمي من المستندات (بصمة المستند) ======
+ * يُشتق من المستند "بصمة رقمية" (SHA-256) تُضمَّن في رمز QR مع البيانات العامة،
+ * وتُعاد حساباتها في صفحة التحقق المستقلة (verify.html) للتحقق من سلامة البيانات.
+ */
+const encUtf8 = new TextEncoder();
+
+export async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", encUtf8.encode(input));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** حقول المستند العامة المضمّنة في رمز QR (بترميز موحد بين التطبيق وصفحة التحقق) */
+export interface DocVerifyFields {
+  n: string; // رقم المستند
+  t: string; // نوع المستند
+  h: string; // عنوان المستند (مقتطع)
+  d: string; // تاريخ التحرير
+  a: string; // المبلغ (بأرقام غربية ثابتة)
+  c: string; // العملة
+  o: string; // الجهة المصدرة (مقتطعة)
+  s: string; // عدد التواقيع الموثقة
+}
+
+export const DOC_VERIFY_VERSION = "2";
+
+/** النص القانوني (canonical) الذي تُحسب عليه البصمة — يجب أن يطابق verify.html تماماً */
+export function docVerifyCanonical(f: DocVerifyFields): string {
+  return ["sajil-verify", DOC_VERIFY_VERSION, f.n, f.t, f.h, f.d, f.a, f.c, f.o, f.s].join("|");
+}
+
+/** بناء حقول التحقق من مستند (نفس القيم تُعرض في صفحة التحقق المستقلة) */
+export function buildDocVerifyFields(doc: {
+  number: string;
+  type: string;
+  title: string;
+  date: string;
+  amount?: number;
+  currency: string;
+}, issuer: string, sigCount = 0): DocVerifyFields {
+  return {
+    n: doc.number,
+    t: doc.type,
+    h: (doc.title || "").slice(0, 60),
+    d: (doc.date || "").slice(0, 10),
+    a: doc.amount !== undefined && doc.amount !== null ? Number(doc.amount).toFixed(2) : "",
+    c: doc.currency,
+    o: (issuer || "").slice(0, 40),
+    s: String(sigCount),
+  };
+}
+
+/** بصمة المستند الرقمية (SHA-256) فوق الحقول العامة */
+export async function computeDocDigest(f: DocVerifyFields): Promise<string> {
+  const hex = await sha256Hex(docVerifyCanonical(f));
+  return hex.slice(0, 16);
+}
+
+/** رابط صفحة التحقق المستقلة مع الحقول + البصمة — ما يُضمَّن في رمز QR */
+export async function buildDocVerifyUrl(
+  doc: { number: string; type: string; title: string; date: string; amount?: number; currency: string },
+  issuer: string,
+  sigCount = 0,
+): Promise<string> {
+  const f = buildDocVerifyFields(doc, issuer, sigCount);
+  const h = await computeDocDigest(f);
+  const qs = new URLSearchParams({
+    v: DOC_VERIFY_VERSION,
+    n: f.n,
+    t: f.t,
+    h: f.h,
+    d: f.d,
+    a: f.a,
+    c: f.c,
+    o: f.o,
+    s: f.s,
+    x: h,
+  });
+  return new URL("verify.html", window.location.href).href + "?" + qs.toString();
+}
+
 /* ===== عناصر نائبة ===== */
 export const PLACEHOLDERS: { key: string; label: string }[] = [
   { key: "org_name", label: "اسم المنشأة" },

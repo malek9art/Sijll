@@ -1,6 +1,6 @@
 /* سجل — Service Worker: استراتيجية Offline-First مع تخزين خطوط قوقل */
-const CACHE = "sajil-v3";
-const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-512.png", "./favicon.svg", "./logo.svg"];
+const CACHE = "sajil-v4";
+const CORE = ["./", "./index.html", "./verify.html", "./manifest.webmanifest", "./icons/icon-512.png", "./favicon.svg", "./logo.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));

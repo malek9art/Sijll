@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>التحقق من المستند | سجل</title>
+  <meta name="description" content="صفحة تحقق مستقلة من منصة سجل — تأكيد مصداقية المستند عبر بصمته الرقمية." />
+  <meta name="theme-color" content="#0f9d6e" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+      background: linear-gradient(160deg, #f1f5f9 0%, #e2e8f0 60%, #d1fae5 130%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      color: #0f172a;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      width: 100%;
+      max-width: 460px;
+      background: #ffffff;
+      border-radius: 22px;
+      box-shadow: 0 24px 70px rgba(2, 6, 23, 0.18);
+      padding: 34px 28px 26px;
+      text-align: center;
+      border: 1px solid #e2e8f0;
+      animation: rise .5s cubic-bezier(.22,1,.36,1) both;
+    }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .logo { width: 64px; height: 64px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 18px;
+      background: linear-gradient(135deg, #10b981, #065f46); color: #fff; font-size: 30px; font-weight: 800;
+      box-shadow: 0 10px 26px rgba(6, 95, 70, .3); }
+    h1 { font-size: 20px; font-weight: 700; }
+    .sub { font-size: 12px; color: #64748b; margin-top: 5px; }
+    .badge { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; margin: 20px auto 12px; font-size: 30px; }
+    .badge.ok { background: #d1fae5; color: #047857; }
+    .badge.warn { background: #fef3c7; color: #b45309; }
+    .badge.err { background: #ffe4e6; color: #e11d48; }
+    .result-title { font-size: 17px; font-weight: 800; }
+    .result-title.ok { color: #047857; }
+    .result-title.warn { color: #b45309; }
+    .result-title.err { color: #e11d48; }
+    .result-note { font-size: 11.5px; color: #64748b; margin-top: 8px; line-height: 1.9; }
+    .facts { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 16px; margin-top: 18px; text-align: right; }
+    .fact { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; padding: 5px 0; border-bottom: 1px dashed #e2e8f0; }
+    .fact:last-child { border-bottom: 0; }
+    .fact .k { color: #94a3b8; font-size: 12px; flex-shrink: 0; }
+    .fact .v { font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .digest { margin-top: 14px; font-size: 10px; color: #94a3b8; direction: ltr; background: #f1f5f9; border-radius: 8px; padding: 6px 10px; font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; }
+    .foot { margin-top: 20px; padding-top: 14px; border-top: 1px solid #e2e8f0; font-size: 10.5px; color: #94a3b8; line-height: 2; }
+    .foot b { color: #047857; }
+    .warn-box { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 12px; padding: 10px 14px; font-size: 11.5px; line-height: 1.9; margin-top: 14px; text-align: right; }
+    .spin { width: 22px; height: 22px; border: 3px solid #e2e8f0; border-top-color: #10b981; border-radius: 50%; margin: 22px auto; animation: rot 0.8s linear infinite; }
+    @keyframes rot { to { transform: rotate(360deg); } }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">س</div>
+    <h1>خدمة التحقق من المستندات</h1>
+    <p class="sub">منصة سجل · تطوير Malek Logic — صفحة مستقلة عن النظام</p>
+
+    <div id="loading"><div class="spin"></div><p class="result-note">جارٍ التحقق من بصمة المستند الرقمية...</p></div>
+
+    <div id="result" class="hidden">
+      <div id="badge" class="badge"></div>
+      <p id="title" class="result-title"></p>
+      <p id="note" class="result-note"></p>
+
+      <div id="facts" class="facts hidden">
+        <div class="fact"><span class="k">رقم المستند</span><span class="v" id="f-n"></span></div>
+        <div class="fact"><span class="k">نوع المستند</span><span class="v" id="f-t"></span></div>
+        <div class="fact"><span class="k">العنوان</span><span class="v" id="f-h"></span></div>
+        <div class="fact"><span class="k">تاريخ التحرير</span><span class="v" id="f-d"></span></div>
+        <div class="fact"><span class="k">المبلغ</span><span class="v" id="f-a"></span></div>
+        <div class="fact"><span class="k">الجهة المصدرة</span><span class="v" id="f-o"></span></div>
+        <div class="fact"><span class="k">التواقيع الموثقة</span><span class="v" id="f-s"></span></div>
+      </div>
+
+      <div id="warn" class="warn-box hidden"></div>
+      <div id="digest" class="digest hidden"></div>
+    </div>
+
+    <div class="foot">
+      هذا الرمز يحمل بيانات المستند وبصمته الرقمية (SHA-256).<br />
+      تطابق البيانات مع البصمة يعني أن المستند صادر عن <b>منصة سجل</b> ببياناته المذكورة ولم يُعدَّل منذ الإصدار.<br />
+      للتحقق الكامل من نسخة المنصة الأصلية، راجع جهة إصدار المستند.
+    </div>
+  </div>
+
+  <script>
+    /* ========== SHA-256 (تطبيق خالص متوافق مع Web Crypto) ========== */
+    function sha256(binStr) {
+      function rrot(v, a) { return (v >>> a) | (v << (32 - a)); }
+      var maxWord = Math.pow(2, 32), L = "length", i, j, result = "", words = [];
+      var bitLen = binStr[L] * 8;
+      var hash = sha256.h = sha256.h || [], k = sha256.k = sha256.k || [];
+      var primeCounter = k[L], isComposite = {};
+      for (var candidate = 2; primeCounter < 64; candidate++) {
+        if (!isComposite[candidate]) {
+          for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+          hash[primeCounter] = (Math.pow(candidate, .5) * maxWord) | 0;
+          k[primeCounter++] = (Math.pow(candidate, 1 / 3) * maxWord) | 0;
+        }
+      }
+      binStr += "\x80";
+      while (binStr[L] % 64 - 56) binStr += "\x00";
+      for (i = 0; i < binStr[L]; i++) {
+        j = binStr.charCodeAt(i);
+        words[i >> 2] |= j << (((3 - i) % 4) * 8);
+      }
+      words[words[L]] = ((bitLen / maxWord) | 0);
+      words[words[L]] = bitLen;
+      for (j = 0; j < words[L];) {
+        var w = words.slice(j, j += 16);
+        var oldHash = hash.slice(0, 8);
+        for (i = 0; i < 64; i++) {
+          var w15 = w[i - 15], w2 = w[i - 2];
+          var a = hash[0], e = hash[4];
+          var t1 = hash[7] + (rrot(e, 6) ^ rrot(e, 11) ^ rrot(e, 25))
+            + ((e & hash[5]) ^ (~e & hash[6])) + k[i]
+            + (w[i] = (i < 16) ? w[i] : (w[i - 16]
+              + (rrot(w15, 7) ^ rrot(w15, 18) ^ (w15 >>> 3)) + w[i - 7]
+              + (rrot(w2, 17) ^ rrot(w2, 19) ^ (w2 >>> 10))) | 0);
+          var t2 = (rrot(a, 2) ^ rrot(a, 13) ^ rrot(a, 22))
+            + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+          hash = [(t1 + t2) | 0].concat(hash);
+          hash[4] = (hash[4] + t1) | 0;
+        }
+        for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+      }
+      for (i = 0; i < 8; i++) {
+        for (j = 3; j + 1; j--) {
+          var b = (hash[i] >> (j * 8)) & 255;
+          result += ((b < 16) ? "0" : "") + b.toString(16);
+        }
+      }
+      return result;
+    }
+    function utf8Bytes(str) { return unescape(encodeURIComponent(str)); }
+
+    /* ========== أدوات عرض ========== */
+    var AR_D = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"];
+    function arDigits(v) { return String(v).replace(/[0-9]/g, function (d) { return AR_D[+d]; }); }
+    var MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+    function fmtDate(iso) {
+      if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—";
+      var p = iso.split("-");
+      return arDigits(+p[2]) + " " + MONTHS[(+p[1]) - 1] + " " + arDigits(+p[0]);
+    }
+    var DOC_LABELS = {
+      acknowledgment: "إقرار دين", commitment: "تعهد بسداد", settlement: "اتفاقية تسوية",
+      notice: "إنذار قانوني", poa: "توكيل", receipt: "سند قبض", release: "إخلاء طرف",
+      contract: "عقد", custom: "قالب مخصص",
+    };
+    function $(id) { return document.getElementById(id); }
+
+    /* ========== منطق التحقق ========== */
+    (function () {
+      var p = new URLSearchParams(window.location.search);
+      var fields = {
+        n: p.get("n") || "", t: p.get("t") || "", h: p.get("h") || "",
+        d: p.get("d") || "", a: p.get("a") || "", c: p.get("c") || "",
+        o: p.get("o") || "", s: p.get("s") || "0", x: p.get("x") || ""
+      };
+      var v = p.get("v") || "";
+
+      function show(kind, title, note, warnText) {
+        $("loading").className = "hidden";
+        $("result").className = "";
+        var badge = $("badge");
+        badge.className = "badge " + kind;
+        badge.textContent = kind === "ok" ? "✓" : (kind === "warn" ? "!" : "✕");
+        $("title").className = "result-title " + kind;
+        $("title").textContent = title;
+        $("note").textContent = note || "";
+        if (warnText) { $("warn").className = "warn-box"; $("warn").textContent = warnText; }
+        else $("warn").className = "warn-box hidden";
+      }
+
+      if (!fields.n || !fields.x) {
+        show("err", "تعذر التحقق من المستند",
+          "هذا الرابط لا يحتوي على بيانات مستند صالحة. تأكد من مسح رمز QR كاملاً المطبوع على المستند.");
+        return;
+      }
+      if (v !== "2") {
+        show("err", "إصدار تحقق غير مدعوم",
+          "هذا المستند صدر بنسخة قديمة من نظام التحقق — تواصل مع جهة الإصدار.");
+        return;
+      }
+
+      var canonical = ["sajil-verify", "2", fields.n, fields.t, fields.h, fields.d, fields.a, fields.c, fields.o, fields.s].join("|");
+      var digest = sha256(utf8Bytes(canonical)).slice(0, 16);
+      var ok = digest === fields.x.toLowerCase();
+
+      $("f-n").textContent = arDigits(fields.n) || "—";
+      $("f-t").textContent = DOC_LABELS[fields.t] || fields.t || "مستند";
+      $("f-h").textContent = fields.h || "—";
+      $("f-d").textContent = fmtDate(fields.d);
+      $("f-a").textContent = fields.a ? (arDigits(fields.a) + " " + (fields.c || "")) : "—";
+      $("f-o").textContent = fields.o || "—";
+      $("f-s").textContent = arDigits(fields.s || "0");
+      $("facts").className = "facts";
+      $("digest").className = "digest";
+      $("digest").textContent = "بصمة المستند: " + digest;
+
+      if (ok) {
+        show("ok", "المستند صحيح وموثق",
+          "البيانات المضمّنة في الرمز مطابقة تماماً للبصمة الرقمية للمستند — لم تُعدّل منذ إصداره من منصة سجل.",
+          null);
+      } else {
+        show("warn", "تحذير: البيانات لا تطابق البصمة الرقمية",
+          "يبدو أن بيانات هذا المستند تعرضت للتعديل أو التلف بعد إصداره.",
+          "لا يُنصح بالاعتماد على هذا المستند — راجع جهة الإصدار للتأكد من النسخة الأصلية.");
+      }
+    })();
+  </script>
+</body>
+</html>

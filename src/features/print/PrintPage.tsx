@@ -2,15 +2,16 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import QRCode from "qrcode";
-import { ArrowRight, Printer, BadgeCheck, Download, Loader2, MessageCircle, Share2 } from "lucide-react";
-import { db, accountingService, ledgerService } from "@/lib/db";
+import { ArrowRight, Printer, BadgeCheck, Download, Fingerprint, Loader2, MessageCircle, Share2, ShieldCheck } from "lucide-react";
+import { db, accountingService, documentsService, ledgerService } from "@/lib/db";
 import { useApp } from "@/lib/store";
 import { useHashRoute } from "@/lib/router";
-import { Button } from "@/components/ui";
+import { Button, Field, Input, Modal, Select } from "@/components/ui";
 import { Logo } from "@/components/Logo";
 import { downloadPDF, sharePDFviaWhatsApp } from "@/lib/pdf";
+import { signWithBiometric } from "@/lib/biometric";
 import { CURRENCIES, DEBT_TYPES, DOC_TYPES, PAYMENT_METHODS, type Debt, type JournalEntry, type Payment } from "@/lib/types";
-import { amountToWordsAr, currencySymbol, fmtDate, fmtMoney, hijriDate, toBase, toDigits, todayISO } from "@/lib/utils";
+import { amountToWordsAr, buildDocVerifyFields, buildDocVerifyUrl, computeDocDigest, currencySymbol, fmtDate, fmtMoney, hijriDate, toBase, toDigits, todayISO } from "@/lib/utils";
 
 export function PrintPage() {
   const route = useHashRoute();
@@ -183,11 +184,64 @@ function QrBox({ value, label }: { value: string; label: string }) {
 }
 
 /* ====== المستند القانوني ====== */
+const SIGN_ROLES = ["الطرف الأول", "الطرف الثاني", "الشاهد الأول", "الشاهد الثاني"];
+
 function DocSheet({ id }: { id: string }) {
-  const { settings } = useApp();
+  const { settings, toast } = useApp();
   const doc = useLiveQuery(() => db.documents.get(id), [id]);
   const party = useLiveQuery(() => (doc?.partyId ? db.parties.get(doc.partyId) : undefined), [doc?.partyId]);
   const arabic = settings.arabicDigits;
+  const [verifyUrl, setVerifyUrl] = useState("");
+  const [signOpen, setSignOpen] = useState(false);
+  const [signRole, setSignRole] = useState("الطرف الثاني");
+  const [signName, setSignName] = useState("");
+  const [signBusy, setSignBusy] = useState(false);
+
+  /* رابط صفحة التحقق المستقلة — يُضمَّن في رمز QR مع بصمة المستند الرقمية */
+  useEffect(() => {
+    if (!doc) return;
+    buildDocVerifyUrl(doc, settings.orgName, doc.signatures?.length || 0).then(setVerifyUrl).catch(() => setVerifyUrl(""));
+  }, [doc, settings.orgName]);
+
+  /* فتح نافذة التوثيق مع تهيئة اسم الموقّع حسب صفته */
+  const openSignModal = (role: string) => {
+    if (!doc) return;
+    setSignRole(role);
+    if (role === "الطرف الأول") setSignName(settings.orgName);
+    else if (role === "الطرف الثاني") setSignName(party?.name || doc.parties.find((p) => p.role.includes("الثاني"))?.name || "");
+    else setSignName(doc.parties.find((p) => p.role === role)?.name || "");
+    setSignOpen(true);
+  };
+
+  const handleBiometricSign = async () => {
+    if (!doc || signBusy) return;
+    setSignBusy(true);
+    try {
+      /* التحدي مشتق من بصمة المستند الرقمية + الرقم + ختم زمني — يربط التوثيق بالمحتوى */
+      const fields = buildDocVerifyFields(doc, settings.orgName, doc.signatures?.length || 0);
+      const digest = await computeDocDigest(fields);
+      const challengeText = `sajil-sign|${doc.number}|${digest}|${Date.now()}`;
+      const attest = await signWithBiometric(challengeText, settings.bioCredentialId);
+      await documentsService.sign(doc.id, {
+        role: signRole,
+        name: signName.trim() || "________________",
+        method: "biometric",
+        at: new Date().toISOString(),
+        credentialId: attest.credentialId,
+        challenge: attest.challenge,
+        clientDataJSON: attest.clientDataJSON,
+        authenticatorData: attest.authenticatorData,
+        signature: attest.signature,
+        rpId: attest.rpId,
+      });
+      toast("success", "تم إلحاق التوقيع والبصمة", `${signRole}: ${signName.trim() || doc.number} — تحقق بيومتري فوري موثق`);
+      setSignOpen(false);
+    } catch (err) {
+      toast("error", "تعذر التوثيق البيومتري", err instanceof Error ? err.message : "حاول مرة أخرى");
+    } finally {
+      setSignBusy(false);
+    }
+  };
 
   const bodyHtml = useMemo(() => {
     if (!doc) return "";
@@ -236,8 +290,13 @@ function DocSheet({ id }: { id: string }) {
             الجهة المصدرة: <b>{settings.orgName}</b>
           </p>
           <p className="text-[10.5px] leading-6 text-slate-600">تاريخ التحرير: {fmtDate(doc.date, arabic)} — الموافق {hijriDate(doc.date)}</p>
+          {(doc.signatures?.length || 0) > 0 && (
+            <p className="mt-0.5 flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+              <Fingerprint size={11} /> موثق بالتوقيع والبصمة: {toDigits(doc.signatures?.length || 0, arabic)} توقيع
+            </p>
+          )}
         </div>
-        <QrBox value={`sajil://verify/${doc.number}`} label={`تحقق ${toDigits(doc.number, arabic)}`} />
+        <QrBox value={verifyUrl || `sajil://verify/${doc.number}`} label={`تحقق ${toDigits(doc.number, arabic)}`} />
       </div>
 
       <div className="doc-title mt-4">{doc.title}</div>
@@ -254,14 +313,30 @@ function DocSheet({ id }: { id: string }) {
       )}
 
       <div className="avoid-break sign-row">
-        {signatories.map((s, i) => (
-          <div key={i} className="sign-box">
-            <p className="text-[10.5px] font-bold text-slate-600">{s.role}</p>
-            <div className="sign-line" />
-            <p className="text-[11.5px] font-bold">{s.name}</p>
-            <p className="text-[9.5px] text-slate-500">التوقيع والختم</p>
-          </div>
-        ))}
+        {signatories.map((s, i) => {
+          const sig = doc.signatures?.find((x) => x.method === "biometric" && (x.role === s.role || (s.role.includes("الثاني") && x.role.includes("الثاني"))));
+          return (
+            <div key={i} className="sign-box">
+              <p className="text-[10.5px] font-bold text-slate-600">{s.role}</p>
+              {sig ? (
+                <div className="flex flex-col items-center gap-0.5 py-1">
+                  <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+                    <Fingerprint size={16} />
+                  </span>
+                  <p className="text-[10.5px] font-bold text-slate-800">{sig.name}</p>
+                  <p className="text-[9px] font-bold text-emerald-700">✓ موثق بيومترياً (بصمة)</p>
+                  <p className="text-[8px] text-slate-500" dir="ltr">{fmtDate(sig.at, arabic, true)}</p>
+                </div>
+              ) : (
+                <>
+                  <div className="sign-line" />
+                  <p className="text-[11.5px] font-bold">{s.name}</p>
+                  <p className="text-[9.5px] text-slate-500">التوقيع والختم</p>
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className="avoid-break mt-4 rounded-lg border border-slate-300 bg-slate-50 p-2 text-center text-[9.5px] leading-5 text-slate-600">
@@ -269,6 +344,44 @@ function DocSheet({ id }: { id: string }) {
       </div>
 
       <SheetFooter />
+
+      {/* شريط التوثيق البيومتري — يظهر على الشاشة فقط ولا يُطبع */}
+      <div className="no-print mt-4 flex flex-wrap items-center justify-center gap-2">
+        <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+          <ShieldCheck size={14} />
+          إلحاق التوقيع وبصمة الإصبع من حساس الجهاز — البصمة لا تُخزَّن ولا تغادر الحساس، ويُحفظ إثبات تحقق بيومتري مربوط بمحتوى المستند.
+        </div>
+        <Button size="sm" onClick={() => openSignModal("الطرف الثاني")}>
+          <Fingerprint size={14} /> إلحاق توقيع وبصمة
+        </Button>
+      </div>
+
+      <div className="no-print">
+        {signOpen && (
+          <Modal open onClose={() => setSignOpen(false)} title="إلحاق التوقيع وبصمة الإصبع">
+            <div className="space-y-4">
+              <div className="rounded-xl bg-emerald-50 p-3 text-[11.5px] leading-6 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+                سيُطلب منك لمس حساس البصمة بالجهاز (أو Face ID) للتحقق من هويتك، ثم يُوثَّق المستند بختم زمني وإثبات تحقق بيومتري مربوط بمحتوى المستند ورقمه. البصمة نفسها لا تُخزَّن ولا تُنقل.
+              </div>
+              <Field label="صفة الموقّع">
+                <Select value={signRole} onChange={(e) => setSignRole(e.target.value)}>
+                  {SIGN_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                </Select>
+              </Field>
+              <Field label="اسم الموقّع">
+                <Input value={signName} onChange={(e) => setSignName(e.target.value)} />
+              </Field>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+                <Button variant="ghost" onClick={() => setSignOpen(false)}>إلغاء</Button>
+                <Button onClick={handleBiometricSign} disabled={signBusy || !signName.trim()}>
+                  {signBusy ? <Loader2 size={15} className="animate-spin" /> : <Fingerprint size={15} />}
+                  {signBusy ? "بانتظار البصمة..." : "لَمس الحساس للتوثيق"}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
+      </div>
     </Sheet>
   );
 }

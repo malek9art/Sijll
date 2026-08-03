@@ -189,11 +189,12 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
 }
 .sheet .no-border, .sheet .no-border th, .sheet .no-border td { border: none !important; background: transparent !important; }
 
-/* نص المستندات القانونية بخط النسخ */
+/* نص المستندات القانونية — بخط النظام IBM Plex Sans Arabic
+   (مع Noto Naskh كخط احتياطي فقط عند عدم توفر الخط الأساسي) */
 .sheet .doc-body {
-  font-family: var(--font-naskh);
-  font-size: 12.5px;
-  line-height: 2.15;
+  font-family: var(--font-doc);
+  font-size: 13px;
+  line-height: 2.05;
   text-align: justify;
   color: #1e293b;
 }

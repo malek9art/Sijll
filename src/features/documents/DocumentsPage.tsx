@@ -175,7 +175,7 @@ export function DocumentsPage() {
 /* ====== محرر المستند ====== */
 function DocEditor({ docId, templates, parties, onClose, onSaved }: {
   docId: string | null; templates: { id: string; name: string; type: DocType; content: string }[];
-  parties: { id: string; name: string }[]; onClose: () => void; onSaved: (id: string, print: boolean) => void;
+  parties: { id: string; name: string; idNumber?: string; idType?: string }[]; onClose: () => void; onSaved: (id: string, print: boolean) => void;
 }) {
   const { settings, toast } = useApp();
   const existing = useLiveQuery(() => (docId ? db.documents.get(docId) : undefined), [docId]);
@@ -188,7 +188,8 @@ function DocEditor({ docId, templates, parties, onClose, onSaved }: {
   const [date, setDate] = useState(existing?.date || todayISO());
   const [dueDate, setDueDate] = useState(existing?.dueDate || "");
   const [reason, setReason] = useState(existing?.reason || "");
-  const [witness1, setWitness1] = useState("");
+  const [witness1, setWitness1] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الأول"))?.name || "");
+  const [witness1Id, setWitness1Id] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الأول"))?.idNumber || "");
 
   /* تهيئة الحقول عند تحميل المستند الموجود (استعلام غير متزامن) */
   useEffect(() => {
@@ -197,7 +198,8 @@ function DocEditor({ docId, templates, parties, onClose, onSaved }: {
       setReason((v) => v || existing.reason || "");
     }
   }, [existing]);
-  const [witness2, setWitness2] = useState("");
+  const [witness2, setWitness2] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الثاني"))?.name || "");
+  const [witness2Id, setWitness2Id] = useState(existing?.parties.find((p) => p.role.includes("الشاهد الثاني"))?.idNumber || "");
   const [body, setBody] = useState(existing?.body || "");
   const [printAfter, setPrintAfter] = useState(true);
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -222,9 +224,9 @@ function DocEditor({ docId, templates, parties, onClose, onSaved }: {
     if (!templateId || !body.trim()) { toast("error", "أكمل البيانات", "اختر قالباً وأدخل النص"); return; }
     const docParties: DocParty[] = [];
     const party = parties.find((p) => p.id === partyId);
-    if (party) docParties.push({ role: "الطرف الثاني", name: party.name });
-    if (witness1.trim()) docParties.push({ role: "الشاهد الأول", name: witness1.trim() });
-    if (witness2.trim()) docParties.push({ role: "الشاهد الثاني", name: witness2.trim() });
+    if (party) docParties.push({ role: "الطرف الثاني", name: party.name, idNumber: party.idNumber, idType: party.idType });
+    if (witness1.trim()) docParties.push({ role: "الشاهد الأول", name: witness1.trim(), idNumber: witness1Id.trim() || undefined });
+    if (witness2.trim()) docParties.push({ role: "الشاهد الثاني", name: witness2.trim(), idNumber: witness2Id.trim() || undefined });
     const doc = await documentsService.save({
       type: docType, title: title.trim() || templates.find((t) => t.id === templateId)?.name || "مستند",
       templateId, partyId: partyId || undefined, amount: amount ? parseFloat(amount) : undefined, currency, date,
@@ -283,12 +285,22 @@ function DocEditor({ docId, templates, parties, onClose, onSaved }: {
         <Field label="سبب الدين / البيان" className="sm:col-span-2">
           <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثال: قرض نقدي بموجب عقد مؤرخ..." />
         </Field>
-        <Field label="الشاهد الأول">
-          <Input value={witness1} onChange={(e) => setWitness1(e.target.value)} />
-        </Field>
-        <Field label="الشاهد الثاني">
-          <Input value={witness2} onChange={(e) => setWitness2(e.target.value)} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="الشاهد الأول">
+            <Input value={witness1} onChange={(e) => setWitness1(e.target.value)} placeholder="اسم الشاهد" />
+          </Field>
+          <Field label="رقم هوية الشاهد الأول (اختياري)">
+            <Input value={witness1Id} onChange={(e) => setWitness1Id(e.target.value)} placeholder="رقم الهوية" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="الشاهد الثاني">
+            <Input value={witness2} onChange={(e) => setWitness2(e.target.value)} placeholder="اسم الشاهد" />
+          </Field>
+          <Field label="رقم هوية الشاهد الثاني (اختياري)">
+            <Input value={witness2Id} onChange={(e) => setWitness2Id(e.target.value)} placeholder="رقم الهوية" />
+          </Field>
+        </div>
 
         <div className="sm:col-span-2">
           <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">

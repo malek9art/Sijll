@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   Building2, Palette, ShieldCheck, DatabaseBackup, Info, KeyRound, Fingerprint,
   Download, Upload, Trash2, Save, CheckCircle2, RefreshCw, Eye, EyeOff, UserRound, CloudUpload, FolderOpen,
+  Eraser, HardDrive, CalendarClock, History,
 } from "lucide-react";
-import { db, backupService, initDB } from "@/lib/db";
+import { db, backupService, cleanupService, initDB, localBackupService } from "@/lib/db";
+import { runAutoBackups, isAutoBackupDue } from "@/lib/backup-auto";
 import { useApp } from "@/lib/store";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Switch } from "@/components/ui";
 import { cn } from "@/utils/cn";
@@ -13,8 +15,8 @@ import {
   listDriveBackups, uploadBackupToDrive, type DriveBackupFile,
 } from "@/lib/drive";
 import { isBiometricAvailable, registerBiometric } from "@/lib/biometric";
-import { CURRENCIES, CURRENCY_KEYS, type AppSettings, type Currency } from "@/lib/types";
-import { decryptJSON, downloadJSON, fmtDate, hashPin, readFileText, todayISO } from "@/lib/utils";
+import { CURRENCIES, CURRENCY_KEYS, type AppSettings, type Currency, type LocalBackup } from "@/lib/types";
+import { decryptJSON, downloadJSON, fmtDate, hashPin, readFileText, toDigits, todayISO } from "@/lib/utils";
 
 function Section({ icon, title, desc, children }: { icon: React.ReactNode; title: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -63,9 +65,22 @@ export function SettingsPage() {
   const [bioAvailable, setBioAvailable] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
 
+  /* النسخ المحلية + التنظيف التلقائي */
+  const [localBackups, setLocalBackups] = useState<LocalBackup[]>([]);
+  const [backupBusy2, setBackupBusy2] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [autoBackupBusy, setAutoBackupBusy] = useState(false);
+
+  const refreshLocalBackups = async () => {
+    try {
+      setLocalBackups(await localBackupService.list());
+    } catch { setLocalBackups([]); }
+  };
+
   useEffect(() => {
     setForm(settings);
     setClientIdInput(settings.driveClientId || "");
+    void refreshLocalBackups();
   }, [settings]);
 
   useEffect(() => {
@@ -78,6 +93,18 @@ export function SettingsPage() {
       const data = await backupService.exportAll();
       const blob = new Blob([JSON.stringify({ app: "sajil", exportedAt: new Date().toISOString(), data }, null, 2)], { type: "application/json" });
       await uploadBackupToDrive(blob, `sajil-backup-${todayISO()}.json`);
+      /* تطبيق سياسة الاحتفاظ: إبقاء آخر N نسخة فقط على درايف */
+      try {
+        const files = await listDriveBackups();
+        const keep = Math.max(1, form.driveBackupKeep || 20);
+        for (const f of files.slice(keep)) {
+          const { deleteDriveBackup } = await import("@/lib/drive");
+          await deleteDriveBackup(f.id);
+        }
+        if (files.length > keep) setDriveFiles(files.slice(0, keep));
+      } catch { /* غير حرج */ }
+      await saveSettings({ lastAutoBackupAt: new Date().toISOString() });
+      await refreshLocalBackups();
       toast("success", "تم الرفع إلى Google Drive", "النسخة محفوظة في مجلد «سجل - نسخ احتياطية»");
     } catch (err) {
       toast("error", "تعذر الرفع إلى درايف", err instanceof Error ? err.message : undefined);
@@ -103,9 +130,10 @@ export function SettingsPage() {
       const text = await downloadBackupFromDrive(f.id);
       const parsed = JSON.parse(text) as { data?: Record<string, unknown> };
       await backupService.importAll((parsed.data || parsed) as Record<string, unknown>, true);
+      await refreshLocalBackups();
       toast("success", "تمت الاستعادة من Google Drive", f.name);
-    } catch {
-      toast("error", "تعذرت الاستعادة", "تأكد من سلامة الملف على درايف");
+    } catch (err) {
+      toast("error", "تعذرت الاستعادة", err instanceof Error ? err.message : "تأكد من سلامة الملف على درايف");
     } finally {
       setDriveBusy("idle");
     }
@@ -151,11 +179,78 @@ export function SettingsPage() {
       const payload = parsed as { app?: string; data?: Record<string, unknown> };
       const data = payload.data || parsed;
       await backupService.importAll(data as Record<string, unknown>, true);
+      await refreshLocalBackups();
       toast("success", "تم استيراد النسخة الاحتياطية بنجاح");
-    } catch {
-      toast("error", "تعذر قراءة الملف", "تأكد من صحة الملف أو عبارة المرور");
+    } catch (err) {
+      toast("error", "تعذر قراءة الملف", err instanceof Error ? err.message : "تأكد من صحة الملف أو عبارة المرور");
     } finally {
       setBackupBusy(null);
+    }
+  };
+
+  const createLocalBackup = async () => {
+    setBackupBusy2(true);
+    try {
+      await localBackupService.create();
+      await localBackupService.applyRetention(form.localBackupKeep || 6);
+      await saveSettings({ lastAutoBackupAt: new Date().toISOString() });
+      await refreshLocalBackups();
+      toast("success", "تم إنشاء نسخة احتياطية محلية", "محفوظة داخل الجهاز — تعمل دون إنترنت");
+    } catch (err) {
+      toast("error", "تعذر إنشاء النسخة المحلية", err instanceof Error ? err.message : undefined);
+    } finally {
+      setBackupBusy2(false);
+    }
+  };
+
+  const restoreLocalBackup = async (b: LocalBackup) => {
+    setBackupBusy2(true);
+    try {
+      await localBackupService.restore(b.id);
+      await refreshLocalBackups();
+      toast("success", "تمت الاستعادة من النسخة المحلية", fmtDate(b.at, arabic, true));
+    } catch (err) {
+      toast("error", "تعذرت الاستعادة", err instanceof Error ? err.message : undefined);
+    } finally {
+      setBackupBusy2(false);
+    }
+  };
+
+  const runCleanupNow = async () => {
+    setCleanupBusy(true);
+    try {
+      const result = await cleanupService.run({
+        autoCleanupEnabled: form.autoCleanupEnabled,
+        cleanupAuditDays: form.cleanupAuditDays,
+        cleanupCancelledMonths: form.cleanupCancelledMonths,
+        localBackupKeep: form.localBackupKeep,
+      });
+      await refreshLocalBackups();
+      if (!result) { toast("info", "التنظيف التلقائي معطّل", "فعّل الخيار أولاً أو حدّث القيم"); }
+      else {
+        const total = result.logs + result.notifications + result.debts + result.backups;
+        toast("success", "اكتمل التنظيف التلقائي", total === 0
+          ? "لا توجد بيانات تجاوزت مدة الاحتفاظ"
+          : `سجل تدقيق: ${result.logs} · تنبيهات: ${result.notifications} · عمليات ملغاة: ${result.debts} · نسخ محلية: ${result.backups}`);
+      }
+    } catch (err) {
+      toast("error", "تعذر التنظيف", err instanceof Error ? err.message : undefined);
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
+  const runAutoBackupNow = async () => {
+    setAutoBackupBusy(true);
+    try {
+      const r = await runAutoBackups(form);
+      await refreshLocalBackups();
+      toast("success", "تم تنفيذ النسخ الاحتياطي التلقائي",
+        `محلي: ${r.local ? "نعم" : "لا"} · درايف: ${r.drive ? "نعم" : "لا"}${r.prunedDrive ? ` · حُذف ${r.prunedDrive} نسخة قديمة` : ""}`);
+    } catch (err) {
+      toast("error", "تعذر التنفيذ", err instanceof Error ? err.message : undefined);
+    } finally {
+      setAutoBackupBusy(false);
     }
   };
 
@@ -350,6 +445,92 @@ export function SettingsPage() {
           </div>
         </Section>
 
+        <Section icon={<Eraser size={18} />} title="الحذف التلقائي للبيانات (سياسة الاحتفاظ)" desc="تُنفَّذ تلقائياً عند تشغيل التطبيق — مع توثيق كل عملية في سجل التدقيق">
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50">
+              <div>
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-200">تفعيل الحذف التلقائي</p>
+                <p className="text-xs text-slate-400">حذف البيانات التي تجاوزت مدة الاحتفاظ أدناه</p>
+              </div>
+              <Switch checked={form.autoCleanupEnabled} onChange={(v) => set("autoCleanupEnabled", v)} />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label={`الاحتفاظ بسجل التدقيق والتنبيهات (أيام)`}>
+                <Input type="number" min={0} value={form.cleanupAuditDays} onChange={(e) => set("cleanupAuditDays", Math.max(0, parseInt(e.target.value) || 0))} />
+              </Field>
+              <Field label="حذف العمليات الملغاة بعد (شهر)">
+                <Input type="number" min={0} value={form.cleanupCancelledMonths} onChange={(e) => set("cleanupCancelledMonths", Math.max(0, parseInt(e.target.value) || 0))} />
+              </Field>
+              <Field label="الاحتفاظ بعدد النسخ المحلية">
+                <Input type="number" min={1} value={form.localBackupKeep} onChange={(e) => set("localBackupKeep", Math.max(1, parseInt(e.target.value) || 1))} />
+              </Field>
+              <Field label="الاحتفاظ بعدد نسخ Google Drive">
+                <Input type="number" min={1} value={form.driveBackupKeep} onChange={(e) => set("driveBackupKeep", Math.max(1, parseInt(e.target.value) || 1))} />
+              </Field>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={async () => { await saveSettings(form); toast("success", "تم حفظ سياسة الاحتفاظ"); }}>
+                <Save size={14} /> حفظ
+              </Button>
+              <Button size="sm" variant="outline" onClick={runCleanupNow} disabled={cleanupBusy}>
+                <RefreshCw size={14} className={cleanupBusy ? "animate-spin" : ""} />
+                {cleanupBusy ? "جارٍ التنظيف..." : "تشغيل التنظيف الآن"}
+              </Button>
+            </div>
+            <p className="rounded-xl bg-slate-50 px-3.5 py-2.5 text-[11.5px] leading-6 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400">
+              <b>مثال:</b> ١٨٠ يوماً لسجل التدقيق و١٢ شهراً للعمليات الملغاة تحافظ على خصوصيتك وتمنع تراكم البيانات دون التأثير على المستندات والعمليات النشطة. القيمة «٠» تعني عدم الحذف لهذا النوع.
+            </p>
+          </div>
+        </Section>
+
+        <Section icon={<HardDrive size={18} />} title="النسخ الاحتياطية المحلية التلقائية" desc="نسخ كاملة داخل الجهاز تُنشأ تلقائياً عند التشغيل — تعمل دون إنترنت وتُدار بسياسة احتفاظ">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
+                <CheckCircle2 size={15} className="text-emerald-600" />
+                {settings.lastAutoBackupAt ? `آخر نسخة تلقائية: ${fmtDate(settings.lastAutoBackupAt, arabic, true)}` : "لم تُنشأ نسخة تلقائية بعد"}
+              </div>
+              <Button size="sm" variant="outline" onClick={createLocalBackup} disabled={backupBusy2}>
+                {backupBusy2 ? <RefreshCw size={14} className="animate-spin" /> : <HardDrive size={14} />}
+                إنشاء نسخة الآن
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50">
+              <div>
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-200">النسخ التلقائي اليومي على Google Drive</p>
+                <p className="text-xs text-slate-400">
+                  {isAutoBackupDue(settings) ? "مستحق الآن — فعّل المزامنة واربط درايف لتفعيله" : "نشط — رفع يومي تلقائي مع إبقاء آخر النسخ فقط"}
+                </p>
+              </div>
+              <Button size="sm" variant="outline" onClick={runAutoBackupNow} disabled={autoBackupBusy}>
+                {autoBackupBusy ? <RefreshCw size={14} className="animate-spin" /> : <CalendarClock size={14} />}
+                تنفيذ الآن
+              </Button>
+            </div>
+            {localBackups.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="flex items-center gap-1.5 text-[12px] font-bold text-slate-600 dark:text-slate-300">
+                  <History size={12} /> النسخ المحلية المحفوظة ({toDigits(localBackups.length, arabic)}):
+                </p>
+                {localBackups.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-semibold text-slate-700 dark:text-slate-200">{fmtDate(b.at, arabic, true)}</p>
+                      <p className="text-[10px] text-slate-400">{toDigits(Math.round(b.size / 1024), arabic)} كيلوبايت</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => restoreLocalBackup(b)}><Download size={13} /> استعادة</Button>
+                      <Button size="sm" variant="ghost" className="text-rose-500 hover:text-rose-600" onClick={async () => { await localBackupService.remove(b.id); await refreshLocalBackups(); }}>
+                        <Trash2 size={13} />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Section>
+
         <Section icon={<CloudUpload size={18} />} title="النسخ الاحتياطي إلى Google Drive" desc="ارفع واستعد نسخك مباشرة من حساب قوقل — يتطلب اتصالاً بالإنترنت فقط عند الرفع/الاستعادة">
           <div className="space-y-4">
             {isDriveConnected() ? (
@@ -397,6 +578,15 @@ export function SettingsPage() {
                   <b>طريقة الربط (مرة واحدة):</b> من Google Cloud Console أنشئ مشروعاً ← فعّل Drive API ← أنشئ OAuth Client ID من نوع «تطبيق ويب» وأضف رابط هذا الموقع في «Authorized JavaScript origins». بعدها أدخل المعرّف أعلاه.
                   <br />بدون ربط، يمكنك دائماً «تصدير نسخة» ثم رفعها يدوياً إلى drive.google.com.
                 </p>
+                {isDriveConnected() && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50">
+                    <div>
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-200">الرفع التلقائي اليومي</p>
+                      <p className="text-xs text-slate-400">نسخة سحابية كل ٢٤ ساعة مع إبقاء آخر {toDigits(form.driveBackupKeep || 20, arabic)} نسخ فقط</p>
+                    </div>
+                    <Switch checked={form.syncEnabled} onChange={(v) => set("syncEnabled", v)} />
+                  </div>
+                )}
               </div>
             )}
 
@@ -435,8 +625,10 @@ export function SettingsPage() {
             <p><b className="text-slate-800 dark:text-slate-200">سجل</b> — منصة شخصية عربية متكاملة لإدارة الحسابات والمديونيات، كشوف الحساب الموحدة، المحاسبة الشخصية، والمستندات.</p>
             <p>الإصدار <Badge className="bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/30">١.٠.٠</Badge> · تطوير <b className="text-brand-700 dark:text-brand-300">Malek Logic</b></p>
             <p>التقنيات: React 19 · Vite · TypeScript · Tailwind CSS · Dexie IndexedDB · PWA</p>
-            <p>يعمل دون اتصال بالإنترنت بالكامل، مع مزامنة سحابية اختيارية، وطباعة احترافية A4.</p>
-            <p className="text-xs text-slate-400">آخر نسخة احتياطية تلقائية: {fmtDate(new Date().toISOString(), arabic, true)}</p>
+            <p>يعمل دون اتصال بالإنترنت بالكامل، مع مزامنة سحابية اختيارية، وطباعة احترافية A4، وتحقق بالمستندات عبر رمز QR وصفحة مستقلة.</p>
+            <p className="text-xs text-slate-400">
+              آخر نسخة احتياطية تلقائية: {settings.lastAutoBackupAt ? fmtDate(settings.lastAutoBackupAt, arabic, true) : "لم تُنفَّذ بعد"}
+            </p>
           </div>
         </Section>
       </div>

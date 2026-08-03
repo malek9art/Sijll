@@ -34,7 +34,7 @@ describe("backupService.exportAll", () => {
 
     const exported = await backupService.exportAll();
 
-    expect(exported.version).toBe(2);
+    expect(exported.version).toBe(3);
     expect(exported.ledgerAccounts).toBeDefined();
     expect(exported.ledgerEntries).toBeDefined();
     expect((exported.ledgerAccounts as unknown[]).length).toBe(1);
