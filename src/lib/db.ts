@@ -1,0 +1,428 @@
+/* ===== قاعدة البيانات المحلية (IndexedDB عبر Dexie) + طبقة الخدمات ===== */
+import Dexie, { type Table } from "dexie";
+import type {
+  Account, AppNotification, AppSettings, AuditLog, Debt, DocTemplate, JournalEntry,
+  LedgerAccount, LedgerEntry, LegalDoc, Party, Payment,
+} from "./types";
+import { DEFAULT_SETTINGS } from "./types";
+import { toBase, uid } from "./utils";
+import { seedIfEmpty } from "./seed";
+
+export class SajilDB extends Dexie {
+  parties!: Table<Party, string>;
+  debts!: Table<Debt, string>;
+  payments!: Table<Payment, string>;
+  accounts!: Table<Account, string>;
+  journalEntries!: Table<JournalEntry, string>;
+  templates!: Table<DocTemplate, string>;
+  documents!: Table<LegalDoc, string>;
+  auditLogs!: Table<AuditLog, string>;
+  notifications!: Table<AppNotification, string>;
+  settings!: Table<{ key: string; value: unknown }, string>;
+  ledgerAccounts!: Table<LedgerAccount, string>;
+  ledgerEntries!: Table<LedgerEntry, string>;
+
+  constructor() {
+    super("sajil-db");
+    this.version(2).stores({
+      parties: "id, name, type, phone",
+      debts: "id, number, type, partyId, status, currency, date, createdAt",
+      payments: "id, debtId, date, method, currency",
+      accounts: "id, code, name, type, parentId",
+      journalEntries: "id, number, date, currency",
+      templates: "id, type, isDefault",
+      documents: "id, number, type, templateId, status, createdAt",
+      auditLogs: "id, at, entity, action, entityId",
+      notifications: "id, at, read, type, title",
+      settings: "key",
+      ledgerAccounts: "id, name, currency, type",
+      ledgerEntries: "id, accountId, date, seq",
+    });
+  }
+}
+
+export const db = new SajilDB();
+
+export async function initDB(): Promise<void> {
+  const row = await db.settings.get("schemaVersion");
+  if ((row?.value as number) !== 4) {
+    /* ترقية المخطط: مسح شامل وإعادة تهيئة بقاعدة نظيفة متوافقة مع الإصدار الجديد */
+    const tables = [
+      db.parties, db.debts, db.payments, db.accounts, db.journalEntries,
+      db.templates, db.documents, db.auditLogs, db.notifications, db.settings,
+      db.ledgerAccounts, db.ledgerEntries,
+    ];
+    await Promise.all(tables.map((t) => t.clear()));
+    await db.settings.put({ key: "schemaVersion", value: 4 });
+  }
+  await seedIfEmpty();
+}
+
+/* ====== الإعدادات ====== */
+export const settingsService = {
+  async get(): Promise<AppSettings> {
+    const row = await db.settings.get("app");
+    return { ...DEFAULT_SETTINGS, ...((row?.value as Partial<AppSettings>) || {}) };
+  },
+  async save(patch: Partial<AppSettings>): Promise<AppSettings> {
+    const current = await this.get();
+    const next = { ...current, ...patch };
+    await db.settings.put({ key: "app", value: next });
+    return next;
+  },
+};
+
+/* ====== سجل التدقيق ====== */
+export const auditService = {
+  async log(action: string, entity: string, entityId?: string, details?: string): Promise<void> {
+    await db.auditLogs.add({ id: uid("log"), at: new Date().toISOString(), actor: "المستخدم الرئيسي", action, entity, entityId, details });
+  },
+  async notify(type: AppNotification["type"], title: string, message: string): Promise<void> {
+    await db.notifications.add({ id: uid("ntf"), at: new Date().toISOString(), type, title, message, read: false });
+  },
+};
+
+/* ====== الأرقام التسلسلية ====== */
+async function nextNumber(prefix: string, width = 4): Promise<string> {
+  const key = `counter:${prefix}`;
+  const row = await db.settings.get(key);
+  const current = ((row?.value as number) || 0) + 1;
+  await db.settings.put({ key, value: current });
+  return `${prefix}-${String(current).padStart(width, "0")}`;
+}
+
+/* ====== خدمة العمليات المالية (الديون) ====== */
+export function computeDebtStatus(debt: Debt, totalPaid: number): Debt["status"] {
+  if (debt.status === "cancelled") return "cancelled";
+  const remaining = debt.amount - totalPaid;
+  if (remaining <= 0.01) return "settled";
+  return totalPaid > 0 ? "partial" : "active";
+}
+
+export const debtsService = {
+  async list(): Promise<Debt[]> {
+    return db.debts.orderBy("createdAt").reverse().toArray();
+  },
+  async get(id: string): Promise<Debt | undefined> {
+    return db.debts.get(id);
+  },
+  async paymentsOf(debtId: string): Promise<Payment[]> {
+    return db.payments.where("debtId").equals(debtId).sortBy("date");
+  },
+  async totalPaid(debtId: string): Promise<number> {
+    const pays = await db.payments.where("debtId").equals(debtId).toArray();
+    return pays.reduce((s, p) => s + p.amount, 0);
+  },
+  async create(input: Omit<Debt, "id" | "number" | "status" | "createdAt" | "updatedAt">): Promise<Debt> {
+    const debt: Debt = {
+      ...input,
+      id: uid("debt"),
+      number: await nextNumber("DEBT"),
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await db.debts.add(debt);
+    await auditService.log("تسجيل عملية مالية", "debt", debt.id, `رقم ${debt.number} — ${debt.amount}`);
+    await journalService.postDebtCreation(debt);
+    return debt;
+  },
+  async update(id: string, patch: Partial<Debt>): Promise<void> {
+    await db.debts.update(id, { ...patch, updatedAt: new Date().toISOString() });
+    await auditService.log("تحديث عملية", "debt", id);
+  },
+  async addPayment(debtId: string, input: Omit<Payment, "id" | "debtId" | "createdAt">): Promise<Payment> {
+    const debt = await db.debts.get(debtId);
+    if (!debt) throw new Error("العملية غير موجودة");
+    if (!(input.amount > 0)) throw new Error("مبلغ الدفعة يجب أن يكون أكبر من صفر");
+
+    const alreadyPaid = await this.totalPaid(debtId);
+    const remainingBefore = Math.round((debt.amount - alreadyPaid) * 100) / 100;
+    if (input.amount - remainingBefore > 0.01) {
+      throw new Error(`المبلغ يتجاوز المتبقي (${remainingBefore.toFixed(2)})`);
+    }
+
+    const payment: Payment = { ...input, id: uid("pay"), debtId, createdAt: new Date().toISOString() };
+    await db.payments.add(payment);
+
+    /* المجموع بعد الإضافة (totalPaid يشمل الدفعة الجديدة — دون جمعها مرتين) */
+    const total = await this.totalPaid(debtId);
+    const status = computeDebtStatus(debt, total);
+    await db.debts.update(debtId, { status, updatedAt: new Date().toISOString() });
+    await auditService.log("تسجيل دفعة", "payment", payment.id, `مبلغ ${input.amount} على العملية ${debt.number}`);
+    await journalService.postPayment(payment, debt, status);
+    return payment;
+  },
+  async settle(debtId: string, date: string): Promise<void> {
+    const debt = await db.debts.get(debtId);
+    if (!debt) return;
+    const total = await this.totalPaid(debtId);
+    const remaining = Math.round((debt.amount - total) * 100) / 100;
+    if (remaining > 0.01) {
+      await this.addPayment(debtId, { date, amount: remaining, currency: debt.currency, method: "cash", notes: "تسوية نهائية" });
+    } else {
+      await db.debts.update(debtId, { status: "settled", updatedAt: new Date().toISOString() });
+    }
+    await auditService.log("تسوية نهائية", "debt", debtId, debt.number);
+  },
+  async cancel(debtId: string): Promise<void> {
+    await db.debts.update(debtId, { status: "cancelled", updatedAt: new Date().toISOString() });
+    await auditService.log("إلغاء عملية", "debt", debtId);
+  },
+  async remove(debtId: string): Promise<void> {
+    await db.payments.where("debtId").equals(debtId).delete();
+    await db.debts.delete(debtId);
+    await auditService.log("حذف عملية", "debt", debtId);
+  },
+};
+
+/* ====== خدمة المحاسبة ====== */
+export interface AccountBalance { account: Account; opening: number; debit: number; credit: number; balance: number; }
+
+export const journalService = {
+  async postDebtCreation(debt: Debt): Promise<void> {
+    const debtorAcc = await db.accounts.where("code").equals("1300").first();
+    const revenueAcc = await db.accounts.where("code").equals("4100").first();
+    const expenseAcc = await db.accounts.where("code").equals("5300").first();
+    const payableAcc = await db.accounts.where("code").equals("2100").first();
+    if (!debtorAcc || !revenueAcc || !payableAcc || !expenseAcc) return;
+    const entry: JournalEntry = {
+      id: uid("je"),
+      number: await nextNumber("JE"),
+      date: debt.date,
+      description: `إنشاء ذمة ${debt.number} — ${debt.reason || ""}`,
+      currency: debt.currency,
+      lines: debt.type === "receivable"
+        ? [{ accountId: debtorAcc.id, debit: debt.amount, credit: 0 }, { accountId: revenueAcc.id, debit: 0, credit: debt.amount }]
+        : [{ accountId: expenseAcc.id, debit: debt.amount, credit: 0 }, { accountId: payableAcc.id, debit: 0, credit: debt.amount }],
+      createdAt: new Date().toISOString(),
+    };
+    await db.journalEntries.add(entry);
+  },
+  async postPayment(payment: Payment, debt: Debt, finalStatus: Debt["status"]): Promise<void> {
+    const cashAcc = await db.accounts.where("code").equals("1100").first();
+    const bankAcc = await db.accounts.where("code").equals("1200").first();
+    const debtorAcc = await db.accounts.where("code").equals("1300").first();
+    const payableAcc = await db.accounts.where("code").equals("2100").first();
+    if (!cashAcc || !bankAcc || !debtorAcc || !payableAcc) return;
+    const cashSide = payment.method === "cash" ? cashAcc : bankAcc;
+    const entry: JournalEntry = {
+      id: uid("je"),
+      number: await nextNumber("JE"),
+      date: payment.date,
+      description: `دفعة ${payment.amount} على الذمة ${debt.number}${finalStatus === "settled" ? " (تسوية نهائية)" : ""}`,
+      currency: payment.currency,
+      lines: debt.type === "receivable"
+        ? [{ accountId: cashSide.id, debit: payment.amount, credit: 0 }, { accountId: debtorAcc.id, debit: 0, credit: payment.amount }]
+        : [{ accountId: payableAcc.id, debit: payment.amount, credit: 0 }, { accountId: cashSide.id, debit: 0, credit: payment.amount }],
+      createdAt: new Date().toISOString(),
+    };
+    await db.journalEntries.add(entry);
+  },
+  async add(input: Omit<JournalEntry, "id" | "number" | "createdAt">): Promise<JournalEntry> {
+    const totalD = input.lines.reduce((s, l) => s + l.debit, 0);
+    const totalC = input.lines.reduce((s, l) => s + l.credit, 0);
+    if (Math.abs(totalD - totalC) > 0.01) throw new Error("القيد غير متوازن: مجموع المدين لا يساوي مجموع الدائن");
+    const entry: JournalEntry = { ...input, id: uid("je"), number: await nextNumber("JE"), createdAt: new Date().toISOString() };
+    await db.journalEntries.add(entry);
+    await auditService.log("ترحيل قيد", "journal", entry.id, `رقم ${entry.number}`);
+    return entry;
+  },
+  async remove(id: string): Promise<void> {
+    await db.journalEntries.delete(id);
+    await auditService.log("حذف قيد", "journal", id);
+  },
+};
+
+export const accountingService = {
+  /**
+   * أرصدة الحسابات موحّدة بالعملة الأساسية عبر أسعار الصرف،
+   * مع إمكانية الاحتساب حتى تاريخ محدد (asOf) للتقارير اللحظية.
+   */
+  async balances(rates: Record<string, number>, base: string, asOf?: string): Promise<AccountBalance[]> {
+    const [accounts, entries] = await Promise.all([db.accounts.toArray(), db.journalEntries.toArray()]);
+    const map = new Map<string, AccountBalance>();
+    for (const acc of accounts) {
+      const cur = acc.currency || base;
+      map.set(acc.id, {
+        account: acc,
+        opening: toBase(acc.openingBalance, cur, rates, base),
+        debit: 0, credit: 0, balance: 0,
+      });
+    }
+    for (const entry of entries) {
+      if (asOf && entry.date > asOf) continue;
+      for (const line of entry.lines) {
+        const row = map.get(line.accountId);
+        if (!row) continue;
+        row.debit += toBase(line.debit, entry.currency, rates, base);
+        row.credit += toBase(line.credit, entry.currency, rates, base);
+      }
+    }
+    for (const row of map.values()) {
+      const { account } = row;
+      const normal = account.type === "asset" || account.type === "expense" ? 1 : -1;
+      row.balance = Math.round((row.opening + (row.debit - row.credit) * normal) * 100) / 100;
+      row.debit = Math.round(row.debit * 100) / 100;
+      row.credit = Math.round(row.credit * 100) / 100;
+      row.opening = Math.round(row.opening * 100) / 100;
+    }
+    return [...map.values()].sort((a, b) => a.account.code.localeCompare(b.account.code));
+  },
+  async inRange(from: string, to: string): Promise<JournalEntry[]> {
+    return db.journalEntries.where("date").between(from, to, true, true).sortBy("date");
+  },
+};
+
+/* ====== خدمة المستندات ====== */
+export const documentsService = {
+  async list(): Promise<LegalDoc[]> {
+    return db.documents.orderBy("createdAt").reverse().toArray();
+  },
+  async get(id: string): Promise<LegalDoc | undefined> {
+    return db.documents.get(id);
+  },
+  async byNumber(number: string): Promise<LegalDoc | undefined> {
+    return db.documents.where("number").equals(number).first();
+  },
+  async save(input: Omit<LegalDoc, "id" | "number" | "createdAt" | "updatedAt" | "history">, existingId?: string): Promise<LegalDoc> {
+    const now = new Date().toISOString();
+    if (existingId) {
+      const existing = await db.documents.get(existingId);
+      await db.documents.update(existingId, { ...input, updatedAt: now, history: [...(existing?.history || []), { at: now, action: "تعديل" }] });
+      const updated = await db.documents.get(existingId);
+      await auditService.log("تعديل مستند", "document", existingId);
+      return updated!;
+    }
+    const doc: LegalDoc = {
+      ...input,
+      id: uid("doc"),
+      number: await nextNumber("DOC"),
+      history: [{ at: now, action: "إنشاء" }],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.documents.add(doc);
+    await auditService.log("إنشاء مستند", "document", doc.id, doc.number);
+    return doc;
+  },
+  async finalize(id: string): Promise<void> {
+    await db.documents.update(id, { status: "final", updatedAt: new Date().toISOString() });
+    await auditService.log("اعتماد مستند", "document", id);
+  },
+  async remove(id: string): Promise<void> {
+    await db.documents.delete(id);
+    await auditService.log("حذف مستند", "document", id);
+  },
+  async duplicate(id: string): Promise<LegalDoc | undefined> {
+    const src = await db.documents.get(id);
+    if (!src) return undefined;
+    const { id: _i, number: _n, createdAt: _c, updatedAt: _u, history: _h, ...rest } = src;
+    const now = new Date().toISOString();
+    const doc: LegalDoc = { ...rest, id: uid("doc"), number: await nextNumber("DOC"), history: [{ at: now, action: "نسخة من " + src.number }], createdAt: now, updatedAt: now };
+    await db.documents.add(doc);
+    return doc;
+  },
+};
+
+/* ====== النسخ الاحتياطي ====== */
+export const backupService = {
+  async exportAll(): Promise<Record<string, unknown>> {
+    const [parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings] = await Promise.all([
+      db.parties.toArray(), db.debts.toArray(), db.payments.toArray(), db.accounts.toArray(),
+      db.journalEntries.toArray(), db.templates.toArray(), db.documents.toArray(), db.auditLogs.toArray(),
+      db.notifications.toArray(), db.settings.toArray(),
+    ]);
+    return { version: 1, parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings };
+  },
+  async importAll(data: Record<string, unknown>, replace = false): Promise<void> {
+    const t = data as Record<string, unknown[]>;
+    await db.transaction("rw", [db.parties, db.debts, db.payments, db.accounts, db.journalEntries, db.templates, db.documents, db.auditLogs, db.notifications, db.settings], async () => {
+      if (replace) {
+        await Promise.all([
+          db.parties.clear(), db.debts.clear(), db.payments.clear(), db.accounts.clear(),
+          db.journalEntries.clear(), db.templates.clear(), db.documents.clear(), db.auditLogs.clear(), db.notifications.clear(),
+        ]);
+      }
+      if (t.parties) await db.parties.bulkPut(t.parties as Party[]);
+      if (t.debts) await db.debts.bulkPut(t.debts as Debt[]);
+      if (t.payments) await db.payments.bulkPut(t.payments as Payment[]);
+      if (t.accounts && t.accounts.length) await db.accounts.bulkPut(t.accounts as Account[]);
+      if (t.journalEntries) await db.journalEntries.bulkPut(t.journalEntries as JournalEntry[]);
+      if (t.templates && t.templates.length) await db.templates.bulkPut(t.templates as DocTemplate[]);
+      if (t.documents) await db.documents.bulkPut(t.documents as LegalDoc[]);
+      if (t.auditLogs) await db.auditLogs.bulkPut(t.auditLogs as AuditLog[]);
+      if (t.notifications) await db.notifications.bulkPut(t.notifications as AppNotification[]);
+      if (t.settings) await db.settings.bulkPut(t.settings as { key: string; value: unknown }[]);
+    });
+  },
+};
+
+/* ====== التذكيرات ====== */
+export async function ensureReminders(): Promise<void> {
+  /* التنبيهات التلقائية للاستحقاقات أُزيلت مع تحويل الذمم إلى منطق عمليات محاسبية */
+}
+
+/* ====== خدمة دفتر الحسابات (كشف الحساب الموحد) ====== */
+export const ledgerService = {
+  async accounts(): Promise<LedgerAccount[]> {
+    return db.ledgerAccounts.toArray();
+  },
+  async getAccount(id: string): Promise<LedgerAccount | undefined> {
+    return db.ledgerAccounts.get(id);
+  },
+  async createAccount(input: Omit<LedgerAccount, "id" | "createdAt">): Promise<LedgerAccount> {
+    const acc: LedgerAccount = { ...input, id: uid("lacc"), createdAt: new Date().toISOString() };
+    await db.ledgerAccounts.add(acc);
+    await auditService.log("إنشاء حساب دفتر", "ledger", acc.id, acc.name);
+    return acc;
+  },
+  async removeAccount(id: string): Promise<void> {
+    await db.ledgerEntries.where("accountId").equals(id).delete();
+    await db.ledgerAccounts.delete(id);
+    await auditService.log("حذف حساب دفتر", "ledger", id);
+  },
+  async entriesOf(accountId: string): Promise<LedgerEntry[]> {
+    return db.ledgerEntries.where("accountId").equals(accountId).sortBy("seq");
+  },
+  async nextSeq(accountId: string): Promise<number> {
+    const all = await this.entriesOf(accountId);
+    return all.reduce((m, e) => Math.max(m, e.seq), 0) + 1;
+  },
+  async addEntry(accountId: string, input: Omit<LedgerEntry, "id" | "accountId" | "seq" | "createdAt">): Promise<LedgerEntry> {
+    const entry: LedgerEntry = {
+      ...input,
+      id: uid("lent"),
+      accountId,
+      seq: await this.nextSeq(accountId),
+      createdAt: new Date().toISOString(),
+    };
+    await db.ledgerEntries.add(entry);
+    await auditService.log("إضافة عملية للدفتر", "ledger", entry.id, entry.description);
+    return entry;
+  },
+  async addDualEntry(
+    accountId: string,
+    base: { date: string; entity: string; reference: string; description: string },
+    first: { description: string; credit: number; debit: number },
+    second: { description: string; credit: number; debit: number }
+  ): Promise<void> {
+    const groupId = uid("grp");
+    const seq = await this.nextSeq(accountId);
+    const now = new Date().toISOString();
+    const rows: LedgerEntry[] = [
+      { ...base, id: uid("lent"), accountId, seq, description: first.description, credit: first.credit, debit: first.debit, groupId, groupLabel: base.description, createdAt: now },
+      { ...base, id: uid("lent"), accountId, seq: seq + 1, description: second.description, credit: second.credit, debit: second.debit, groupId, createdAt: now },
+    ];
+    await db.ledgerEntries.bulkAdd(rows);
+    await auditService.log("ترحيل قيد محاسبي مزدوج بالدفتر", "ledger", accountId, base.description);
+  },
+  async updateEntry(id: string, patch: Partial<LedgerEntry>): Promise<void> {
+    await db.ledgerEntries.update(id, { ...patch, updatedAt: new Date().toISOString() });
+    await auditService.log("تعديل عملية دفتر", "ledger", id);
+  },
+  async removeEntry(id: string): Promise<void> {
+    await db.ledgerEntries.delete(id);
+    await auditService.log("حذف عملية دفتر", "ledger", id);
+  },
+};

@@ -1,0 +1,295 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-doc: "IBM Plex Sans Arabic", "Noto Naskh Arabic", ui-sans-serif, sans-serif;
+  --font-naskh: "Noto Naskh Arabic", serif;
+  /* لوحة الهوية — مطابقة لشعار سجل (أخضر زمردي) */
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #0f9d6e;
+  --color-brand-700: #047857;
+  --color-brand-800: #065f46;
+  --color-brand-900: #064e3b;
+  --color-brand-950: #032c1f;
+  --animate-fade-up: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade-in: fade-in 0.3s ease both;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: #0f9d6e; color: #fff; }
+
+* { scrollbar-width: thin; scrollbar-color: #94a3b8 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ==========================================================
+   أوراق A4 — تصميم عصري احترافي للطباعة وتصدير PDF
+   ========================================================== */
+.print-surface {
+  background: #e2e8f0;
+  background-image: radial-gradient(circle at 20% 10%, #cbd5e1 0%, #e2e8f0 55%);
+  padding: 26px 8px 40px;
+  min-height: 100vh;
+}
+
+.sheet {
+  width: 210mm;
+  min-height: 296mm;
+  background: #ffffff;
+  color: #0f172a;
+  direction: rtl;
+  padding: 11mm 10mm 13mm;
+  margin: 0 auto;
+  box-shadow: 0 18px 60px rgba(2, 6, 23, 0.22);
+  font-family: var(--font-doc);
+  font-size: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* شريط لوني علوي رفيع */
+.sheet::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 5mm;
+  background: linear-gradient(90deg, #065f46 0%, #10b981 45%, #a7f3d0 100%);
+}
+
+/* ترويسة عصرية */
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 4mm;
+  padding-bottom: 9px;
+  border-bottom: 2px solid #047857;
+}
+.sheet-org-name { font-size: 15.5px; font-weight: 700; color: #0f172a; letter-spacing: -0.2px; }
+.sheet-org-line { font-size: 10.5px; line-height: 1.75; color: #475569; }
+.sheet-logo {
+  width: 15mm; height: 15mm;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #10b981, #065f46);
+  color: #fff; font-size: 22px; font-weight: 800;
+  box-shadow: 0 4px 12px rgba(6, 95, 70, 0.28);
+}
+.sheet-meta {
+  margin-top: 6px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  font-size: 9.5px; font-weight: 600; color: #047857;
+}
+.sheet-chip {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: #065f46;
+}
+
+/* عنوان المستند */
+.sheet .doc-title {
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+  margin: 12px 0 4px;
+  color: #0f172a;
+}
+.sheet .doc-subtitle { text-align: center; font-size: 10.5px; color: #64748b; margin-bottom: 8px; }
+.sheet .doc-title-rule {
+  width: 60px; height: 3px; border-radius: 3px;
+  background: linear-gradient(90deg, #047857, #34d399);
+  margin: 0 auto 12px;
+}
+
+/* بطاقة معلومات */
+.sheet .info-card {
+  border: 1px solid #cbd5e1;
+  border-right: 4px solid #047857;
+  border-radius: 9px;
+  background: #f8fafc;
+  padding: 9px 12px;
+  font-size: 11px;
+  line-height: 1.85;
+}
+.sheet .info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; }
+.sheet .info-grid span { color: #64748b; }
+.sheet .info-grid b { color: #0f172a; font-weight: 600; }
+
+/* جداول عصرية */
+.sheet table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  margin-top: 6px;
+}
+.sheet th, .sheet td {
+  border-bottom: 1px solid #e2e8f0;
+  border-left: 1px solid #e2e8f0;
+  padding: 5.5px 7px;
+  font-size: 10.5px;
+  line-height: 1.65;
+  vertical-align: middle;
+}
+.sheet th:last-child, .sheet td:last-child { border-left: 0; }
+.sheet thead th {
+  background: #047857;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 10px;
+  border-bottom: 1px solid #0b5d56;
+  border-left-color: rgba(255, 255, 255, 0.22);
+  text-align: center;
+}
+.sheet tbody tr:nth-child(even) { background: #f8fafc; }
+.sheet tbody tr:last-child td { border-bottom: 0; }
+.sheet .total-row td {
+  background: #ecfdf5 !important;
+  font-weight: 700;
+  border-top: 2px solid #047857;
+  color: #064e3b;
+}
+.sheet .group-row td {
+  background: #fffbeb !important;
+  color: #92400e;
+  font-weight: 700;
+  font-size: 9.5px;
+  text-align: center;
+}
+.sheet .no-border, .sheet .no-border th, .sheet .no-border td { border: none !important; background: transparent !important; }
+
+/* نص المستندات القانونية بخط النسخ */
+.sheet .doc-body {
+  font-family: var(--font-naskh);
+  font-size: 12.5px;
+  line-height: 2.15;
+  text-align: justify;
+  color: #1e293b;
+}
+.sheet .doc-body p { margin-bottom: 9px; }
+
+/* صندوق المبلغ */
+.sheet .amount-box {
+  border: 1.5px solid #047857;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f0fdfa, #ffffff);
+  padding: 9px 12px;
+  margin-top: 12px;
+  font-size: 11.5px;
+  line-height: 1.9;
+}
+
+/* ملخص بطاقات */
+.sheet .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.sheet .summary-item {
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  padding: 7px 10px;
+  background: #f8fafc;
+  text-align: center;
+}
+.sheet .summary-item .k { font-size: 9.5px; color: #64748b; font-weight: 600; }
+.sheet .summary-item .v { font-size: 13px; font-weight: 800; color: #0f172a; margin-top: 2px; }
+.sheet .summary-item.accent { background: #f0fdfa; border-color: #5eead4; }
+.sheet .summary-item.accent .v { color: #047857; }
+
+/* التواقيع */
+.sheet .sign-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.sheet .sign-box {
+  flex: 1;
+  text-align: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 9px;
+  padding: 8px 6px 10px;
+  background: #fdfdfe;
+}
+.sheet .sign-line { border-bottom: 1px solid #94a3b8; height: 26px; margin: 4px 8px 6px; }
+
+/* التذييل */
+.sheet .sheet-foot {
+  margin-top: 16px;
+  padding-top: 7px;
+  border-top: 1px solid #cbd5e1;
+  text-align: center;
+  font-size: 9px;
+  line-height: 1.7;
+  color: #64748b;
+}
+.sheet .foot-brand { color: #047857; font-weight: 700; }
+
+/* ==========================================================
+   قواعد الطباعة
+   ========================================================== */
+@media print {
+  @page { size: A4 portrait; margin: 8mm 7mm 10mm; }
+  html, body { background: #ffffff !important; margin: 0 !important; padding: 0 !important; }
+  body * { visibility: hidden; }
+  .print-root, .print-root * { visibility: visible; }
+  .print-root { position: absolute; inset: 0; width: 100%; }
+  .no-print { display: none !important; }
+  .print-surface { background: #ffffff !important; background-image: none !important; padding: 0 !important; min-height: 0 !important; }
+  .sheet {
+    width: 100%;
+    min-height: 0;
+    box-shadow: none !important;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .sheet::before { display: none; }
+  .sheet-head { margin-top: 0; }
+  .sheet *, .sheet thead th, .sheet .total-row td, .sheet .group-row td {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, .sign-row, .avoid-break, .info-card, .amount-box, .summary-grid, .sheet-foot {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .keep-with-next { break-after: avoid; page-break-after: avoid; }
+  p, td { orphans: 3; widows: 3; }
+}
+
+kbd {
+  font-family: var(--font-sans);
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  padding: 0 5px;
+  font-size: 10px;
+  opacity: 0.6;
+}
