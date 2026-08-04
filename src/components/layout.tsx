@@ -4,10 +4,11 @@ import { useLiveQuery } from "dexie-react-hooks";
 /* الحركات تعتمد على CSS فقط (لا framer-motion) */
 import {
   LayoutDashboard, HandCoins, NotebookPen, Scale, FileText, Settings, Bell, Sun, Moon, Lock, Menu, X,
-  Search, CheckCheck, ShieldCheck, FileSpreadsheet, WifiOff,
+  Search, CheckCheck, ShieldCheck, FileSpreadsheet, WifiOff, LogOut,
 } from "lucide-react";
 import { Link, useHashRoute } from "@/lib/router";
 import { useApp } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { cn } from "@/utils/cn";
 import { fmtDate, toDigits } from "@/lib/utils";
@@ -55,7 +56,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
       <div className="mx-5 mb-4 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[11.5px] font-semibold text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-        {settings.orgName}
+        {settings.orgName || "مساحتك الشخصية"}
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-3">
         {NAV.map((item) => (
@@ -142,6 +143,7 @@ function useOnline(): boolean {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { settings, toggleTheme, lock, toast } = useApp();
+  const { user, signOut } = useAuth();
   const [mobileNav, setMobileNav] = useState(false);
   const [query, setQuery] = useState("");
   const online = useOnline();
@@ -226,9 +228,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <Lock size={17} />
               </button>
-              <div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white py-1.5 pr-1.5 pl-3 dark:border-slate-700 dark:bg-slate-800 md:flex">
-                <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-black text-white">م</div>
-                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">المستخدم الرئيسي</span>
+              <div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white py-1.5 pr-1.5 pl-1.5 dark:border-slate-700 dark:bg-slate-800 md:flex">
+                <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-black text-white">
+                  {(user?.name || user?.email || "م").slice(0, 1)}
+                </div>
+                <div className="max-w-36 text-right">
+                  <span className="block truncate text-xs font-bold text-slate-600 dark:text-slate-300">{user?.name || "المستخدم"}</span>
+                  <span className="block truncate text-[10px] text-slate-400" dir="ltr">{user?.email}</span>
+                </div>
+                <button
+                  onClick={() => void signOut()}
+                  aria-label="تسجيل الخروج"
+                  title="تسجيل الخروج"
+                  className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 cursor-pointer"
+                >
+                  <LogOut size={15} />
+                </button>
               </div>
             </div>
           </div>

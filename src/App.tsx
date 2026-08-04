@@ -4,6 +4,8 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { ShieldCheck, Lock, Eye, EyeOff, Fingerprint } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { AppProvider, useApp } from "@/lib/store";
+import { AuthProvider } from "@/lib/auth";
+import { AuthGate } from "@/components/AuthGate";
 import { navigate, useHashRoute } from "@/lib/router";
 import { AppShell } from "@/components/layout";
 import { Button, ToastViewport } from "@/components/ui";
@@ -221,10 +223,7 @@ function Router() {
         const s = await settingsService.get();
         await cleanupService.run(s);
       } catch { /* غير حرج */ }
-      try {
-        const { runAutoBackups } = await import("@/lib/backup-auto");
-        await runAutoBackups();
-      } catch { /* غير حرج */ }
+      /* النسخ الاحتياطية لا تُرفع تلقائياً؛ يطلبها المستخدم يدوياً من الإعدادات. */
     })();
   }, []);
 
@@ -272,11 +271,21 @@ function Router() {
   );
 }
 
-export default function App() {
+function AuthenticatedApp() {
   return (
     <AppProvider>
       <Router />
       <ToastViewport />
     </AppProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGate>
+        <AuthenticatedApp />
+      </AuthGate>
+    </AuthProvider>
   );
 }

@@ -1,6 +1,5 @@
-/* ====== بيانات التهيئة: دليل الحسابات، القوالب القانونية المحترفة، الحساب الشخصي ====== */
-import type { Account, Debt, DocTemplate, JournalEntry, LegalDoc, LedgerAccount, LedgerEntry, Party } from "./types";
-import { uid } from "./utils";
+/* ====== بيانات التهيئة العامة: دليل الحسابات والقوالب القانونية ====== */
+import type { Account, DocTemplate } from "./types";
 
 export const DEFAULT_ACCOUNTS: Account[] = [
   { id: "acc-assets", code: "1000", name: "الأصول", type: "asset", openingBalance: 0, isActive: true },
@@ -329,132 +328,27 @@ export const DEFAULT_TEMPLATES: DocTemplate[] = [
   },
 ];
 
-/* ====== الحساب الشخصي الافتراضي: كشف الحساب الموحد (25 عملية) ====== */
-export const ABDULAZIZ_NAME = "عبدالعزيز عبدالغني سلطان عبدالولي عبده";
-
-interface SeedOp {
-  date: string;
-  entity: string;
-  ref: string;
-  desc: string;
-  credit: number;
-  debit?: number;
-  group?: string;
-  groupLabel?: string;
-}
-
-export const ABDULAZIZ_OPS: SeedOp[] = [
-  { date: "2025-07-02", entity: "تحويل بنكي", ref: "FT25183NW98X", desc: "تحويل من عبدالباقي علي ناجي القدسي إلى عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 1001.25 },
-  { date: "2025-10-14", entity: "عالم الصرافة", ref: "3127310439", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 200 },
-  { date: "2025-10-21", entity: "عالم الصرافة", ref: "1554091197", desc: "تم التحويل بتوجيهكم إلى عبدالعزيز عبدالغني سلطان عبدالولي عبده المرسل مالك أحمد عبدالله علي الوصابي", credit: 150 },
-  { date: "2025-11-11", entity: "شبكة الامتياز إكسبرس", ref: "1163185546", desc: "تم التحويل بتوجيهكم إلى محمد عفيف مهيوب أحمد قاسم", credit: 200 },
-  { date: "2025-11-27", entity: "تعويض", ref: "لا يوجد", desc: "تعويض خسارة الأخ عبدالمجيد سفره من ظهران الجنوب ذهابا وإيابا وذلك لعرض مجوهرات تابعة لعبد العزيز ثقة بكلامه بأنها أصلية وأثبت أنها مقلدة", credit: 1800 },
-  { date: "2025-11-28", entity: "براق ويسترن يونيون", ref: "0263146212", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 200 },
-  { date: "2025-12-03", entity: "براق ويسترن يونيون", ref: "4657045007", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 2000 },
-  { date: "2025-12-05", entity: "براق ويسترن يونيون", ref: "5342060467", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 1500 },
-  { date: "2025-12-24", entity: "براق ويسترن يونيون", ref: "3607177658", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 500 },
-  { date: "2026-01-05", entity: "براق ويسترن يونيون", ref: "4304379267", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 500 },
-  { date: "2026-01-07", entity: "براق ويسترن يونيون", ref: "8621684386", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 1000 },
-  { date: "2026-01-08", entity: "دادية أون لاين", ref: "9950174700", desc: "تم التحويل بتوجيهكم إلى محمد عفيف مهيوب أحمد قاسم", credit: 2500 },
-  { date: "2026-01-11", entity: "إقرار والتزام", ref: "لا يوجد", desc: "الحركة الأولى: سداد الرصيد الفعلي المحسوب من العمليات السابقة", credit: 0, debit: 11551.25, group: "grp-ack", groupLabel: "قيد الإقرار المحاسبي المزدوج — إقرار بالدين وتسوية الحساب مع عبدالعزيز عبدالغني سلطان عبدالولي عبده" },
-  { date: "2026-01-11", entity: "إقرار والتزام", ref: "لا يوجد", desc: "الحركة الثانية: إقرار عبدالعزيز عبدالغني سلطان عبدالولي عبده بالمديونية لمالك أحمد عبدالله علي الوصابي بالكامل بمبلغ 35,314 ريال سعودي وتم اعتماد هذا الرصيد كرصيد افتتاحي جديد", credit: 35314, debit: 0, group: "grp-ack" },
-  { date: "2026-01-12", entity: "بنك الكريمي", ref: "3136244287", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان", credit: 401.88 },
-  { date: "2026-01-17", entity: "براق ويسترن يونيون", ref: "4947450806", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 150 },
-  { date: "2026-01-17", entity: "شبكة الامتياز إكسبرس", ref: "1192205516", desc: "تم التحويل بتوجيهكم إلى محمد منصور سرحان علي الحميري", credit: 1500 },
-  { date: "2026-01-17", entity: "سند قيد بسيط", ref: "لا يوجد", desc: "إلى حساب نايف سلطان عبد الولي عبده الأحمدي ضمانة مالك بالسداد", credit: 15673.55 },
-  { date: "2026-01-18", entity: "شبكة الامتياز إكسبرس", ref: "1198916634", desc: "تم التحويل بتوجيهكم إلى محمد منصور سرحان علي الحميري", credit: 1500 },
-  { date: "2026-01-23", entity: "براق ويسترن يونيون", ref: "8575152594", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 300 },
-  { date: "2026-01-28", entity: "براق ويسترن يونيون", ref: "6029763290", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 600 },
-  { date: "2026-02-01", entity: "الشبكة الموحدة للأموال", ref: "1534097279", desc: "تم التحويل بتوجيهكم إلى مروى عبدالعليم محمد عبده", credit: 2380 },
-  { date: "2026-02-06", entity: "براق ويسترن يونيون", ref: "6677611671", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 150 },
-  { date: "2026-02-07", entity: "براق ويسترن يونيون", ref: "2136078327", desc: "تحويل لصالح عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 200 },
-  { date: "2026-02-16", entity: "براق ويسترن يونيون", ref: "3288768734", desc: "تحويل من مالك أحمد عبدالله علي الوصابي إلى عبدالعزيز عبدالغني سلطان عبدالولي عبده", credit: 300 },
-  { date: "2026-02-17", entity: "سند قيد بسيط", ref: "لا يوجد", desc: "إلى حساب الصندوق الرئيسي حوالة عبدالعزيز عبدالغني سلطان عبدالولي عبده من عالم الصرافة ضمانة مالك بالسداد", credit: 10000 },
-];
-
+/**
+ * تهيئة مساحة المستخدم بالبيانات العامة فقط.
+ * لا تُزرع أي أسماء أو معاملات شخصية تلقائياً؛ البيانات التجارية تبدأ فارغة.
+ */
 export async function seedIfEmpty(): Promise<void> {
   const { db } = await import("./db");
   const seeded = await db.settings.get("seeded");
-  if (seeded) return;
+  if (seeded?.value) return;
 
-  await db.transaction(
-    "rw",
-    [
-      db.accounts, db.templates, db.settings, db.parties, db.debts, db.payments,
-      db.journalEntries, db.documents, db.notifications, db.ledgerAccounts, db.ledgerEntries,
-    ],
-    async () => {
-      await db.accounts.bulkPut(DEFAULT_ACCOUNTS);
-      await db.templates.bulkPut(DEFAULT_TEMPLATES);
+  await db.transaction("rw", [db.accounts, db.templates, db.settings], async () => {
+    /* حارس داخل المعاملة لمنع تهيئة مزدوجة عند فتح تبويبين معاً. */
+    const alreadySeeded = await db.settings.get("seeded");
+    if (alreadySeeded?.value) return;
 
-      const now = new Date().toISOString();
-
-      const pAziz: Party = {
-        id: uid("pty"), name: ABDULAZIZ_NAME, type: "individual",
-        idType: "بطاقة شخصية", idNumber: "", phone: "", address: "المملكة العربية السعودية",
-        nationality: "يمنية", notes: "حساب مديونية متابعة — كشف حساب موحد", createdAt: now,
-      };
-      await db.parties.bulkPut([pAziz]);
-
-      const laccAziz: LedgerAccount = {
-        id: uid("lacc"), name: ABDULAZIZ_NAME, currency: "SAR", type: "receivable",
-        notes: "كشف حساب موحد — 25 عملية بترتيبها الزمني (من 02/07/2025 إلى 17/02/2026)", createdAt: now,
-      };
-      await db.ledgerAccounts.add(laccAziz);
-
-      const entries: LedgerEntry[] = ABDULAZIZ_OPS.map((op, i) => ({
-        id: uid("lent"),
-        accountId: laccAziz.id,
-        seq: i + 1,
-        date: op.date,
-        entity: op.entity,
-        reference: op.ref,
-        description: op.desc,
-        credit: op.credit,
-        debit: op.debit || 0,
-        groupId: op.group,
-        groupLabel: op.groupLabel,
-        createdAt: now,
-      }));
-      await db.ledgerEntries.bulkAdd(entries);
-
-      const debtAziz: Debt = {
-        id: uid("debt"), number: "DEBT-0001", type: "receivable", partyId: pAziz.id,
-        amount: 68469.43, currency: "SAR", date: "2026-02-17", status: "active",
-        reason: "إجمالي المديونية المقر بها وفق كشف الحساب الموحد حتى 17/02/2026 (رصيد افتتاحي 35,314 ر.س + عمليات لاحقة)",
-        createdAt: now, updatedAt: now,
-      };
-      await db.debts.bulkPut([debtAziz]);
-
-      const acc = (code: string) => DEFAULT_ACCOUNTS.find((a) => a.code === code)!;
-      const mk = (n: string, date: string, description: string, lines: { a: string; d: number; c: number }[]): JournalEntry => ({
-        id: uid("je"), number: n, date, description, currency: "SAR" as const,
-        lines: lines.map((l) => ({ accountId: acc(l.a).id, debit: l.d, credit: l.c })),
-        createdAt: now,
-      });
-      await db.journalEntries.bulkPut([
-        mk("JE-0001", "2026-01-11", "قيد الإقرار المحاسبي المزدوج — رصيد افتتاحي معتمد 35,314 ر.س (عبدالعزيز عبدالغني سلطان عبدالولي عبده)", [{ a: "1300", d: 35314, c: 0 }, { a: "4100", d: 0, c: 35314 }]),
-        mk("JE-0002", "2026-02-17", "زيادة المديونية — عمليات لاحقة حتى 17/02/2026 بمبلغ 33,155.43 ر.س", [{ a: "1300", d: 33155.43, c: 0 }, { a: "4100", d: 0, c: 33155.43 }]),
-      ]);
-
-      const doc: LegalDoc = {
-        id: uid("doc"), number: "DOC-0001", type: "acknowledgment",
-        title: "إقرار مديونية — عبدالعزيز عبدالغني سلطان عبدالولي عبده",
-        templateId: "tpl-ack", partyId: pAziz.id, amount: 68469.43, currency: "SAR",
-        date: "2026-02-17", dueDate: "2026-05-17",
-        reason: "إجمالي المديونية المقر بها وفق كشف الحساب الموحد حتى 17/02/2026",
-        body: DEFAULT_TEMPLATES[0].content,
-        parties: [{ role: "الطرف الثاني", name: ABDULAZIZ_NAME, idType: "بطاقة شخصية" }],
-        status: "final", history: [{ at: now, action: "إنشاء" }], createdAt: now, updatedAt: now,
-      };
-      await db.documents.put(doc);
-
-      await db.settings.bulkPut([
-        { key: "seeded", value: true },
-        { key: "counter:DEBT", value: 1 },
-        { key: "counter:DOC", value: 1 },
-        { key: "counter:JE", value: 2 },
-      ]);
-    }
-  );
+    await db.accounts.bulkPut(DEFAULT_ACCOUNTS);
+    await db.templates.bulkPut(DEFAULT_TEMPLATES);
+    await db.settings.bulkPut([
+      { key: "seeded", value: true },
+      { key: "counter:DEBT", value: 0 },
+      { key: "counter:DOC", value: 0 },
+      { key: "counter:JE", value: 0 },
+    ]);
+  });
 }

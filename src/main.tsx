@@ -2,16 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
-import { initDB } from "./lib/db";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-async function boot(): Promise<void> {
-  try {
-    await initDB();
-  } catch (err) {
-    console.error("تعذر تهيئة قاعدة البيانات:", err);
-  }
-
+function boot(): void {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <ErrorBoundary>

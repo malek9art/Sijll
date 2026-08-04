@@ -225,7 +225,7 @@ export function Dashboard() {
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
             <p className="text-sm font-medium text-brand-100">{greeting} 👋</p>
-            <h2 className="mt-1 truncate text-xl font-black sm:text-2xl">{settings.orgName}</h2>
+            <h2 className="mt-1 truncate text-xl font-black sm:text-2xl">{settings.orgName || "مساحتك الشخصية"}</h2>
             <p className="mt-1 text-[12px] text-brand-100/85">{fmtDate(todayISO(), arabic)} الموافق {hijriDate(todayISO())}</p>
             <p className="mt-3 max-w-xl text-[13px] leading-6 text-brand-100/90">
               صافي مركزك المالي: <b className="text-white">{fmtMoney(stats.net, base, arabic)}</b>

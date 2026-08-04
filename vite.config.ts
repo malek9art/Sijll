@@ -11,6 +11,14 @@ const __dirname = path.dirname(__filename);
 export default defineConfig({
   /* مسار نسبي لتوافق GitHub Pages (الموقع يُنشر في مسار فرعي) */
   base: "./",
+  server: {
+    host: "0.0.0.0",
+    allowedHosts: true,
+  },
+  preview: {
+    host: "0.0.0.0",
+    allowedHosts: true,
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

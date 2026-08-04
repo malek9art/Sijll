@@ -91,10 +91,10 @@ async function ensureFolder(): Promise<string> {
 }
 
 /** رفع نسخة احتياطية إلى مجلد التطبيق في درايف */
-export async function uploadBackupToDrive(blob: Blob, fileName: string): Promise<void> {
+export async function uploadBackupToDrive(blob: Blob, fileName: string, appProperties?: Record<string, string>): Promise<void> {
   if (!isDriveConnected()) await connectDrive(currentClientId);
   const folderId = await ensureFolder();
-  const meta = { name: fileName, mimeType: "application/json", parents: [folderId] };
+  const meta = { name: fileName, mimeType: "application/json", parents: [folderId], appProperties };
   const form = new FormData();
   form.append("metadata", new Blob([JSON.stringify(meta)], { type: "application/json" }));
   form.append("file", blob);
@@ -106,17 +106,24 @@ export async function uploadBackupToDrive(blob: Blob, fileName: string): Promise
   if (!res.ok) throw new Error(`فشل الرفع (${res.status})`);
 }
 
-export interface DriveBackupFile { id: string; name: string; modifiedTime: string; size: string }
+export interface DriveBackupFile {
+  id: string;
+  name: string;
+  modifiedTime: string;
+  size: string;
+  appProperties?: Record<string, string>;
+}
 
-/** قائمة النسخ الاحتياطية في مجلد التطبيق */
-export async function listDriveBackups(): Promise<DriveBackupFile[]> {
+/** قائمة النسخ الاحتياطية، مع تصفية اختيارية بمعرف مالك النسخة */
+export async function listDriveBackups(ownerHash?: string): Promise<DriveBackupFile[]> {
   if (!isDriveConnected()) await connectDrive(currentClientId);
-  const q = `name contains 'sajil-backup' and trashed=false`;
-  const res = await fetch(`${DRIVE_FILES}?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc`, {
+  const q = `name contains 'sijll-backup' and trashed=false`;
+  const res = await fetch(`${DRIVE_FILES}?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,size,appProperties)&orderBy=modifiedTime desc`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const json = await res.json();
-  return (json.files || []) as DriveBackupFile[];
+  const files = (json.files || []) as DriveBackupFile[];
+  return ownerHash ? files.filter((file) => file.appProperties?.sijllOwnerHash === ownerHash) : files;
 }
 
 /** تنزيل نسخة من درايف كنص */

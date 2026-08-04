@@ -24,8 +24,8 @@ export class SajilDB extends Dexie {
   /** النسخ الاحتياطية المحلية التلقائية (داخل الجهاز — IndexedDB) */
   backups!: Table<LocalBackup, string>;
 
-  constructor() {
-    super("sajil-db");
+  constructor(name = "sajil-db") {
+    super(name);
     /* رقم إصدار Dexie مُوحّد مع schemaVersion في initDB (حاليًا 5) */
     this.version(5).stores({
       parties: "id, name, type, phone",
@@ -45,7 +45,61 @@ export class SajilDB extends Dexie {
   }
 }
 
-export const db = new SajilDB();
+export const LEGACY_DB_NAME = "sajil-db";
+const GUEST_DB_NAME = "sajil-guest";
+
+/*
+ * قاعدة البيانات النشطة تُبدّل بعد نجاح مصادقة Neon.
+ * كل مستخدم يحصل على قاعدة IndexedDB مستقلة مشتقة من userId؛
+ * لا تُستخدم قاعدة مشتركة بين المستخدمين.
+ */
+export let db = new SajilDB(LEGACY_DB_NAME);
+let activeDbName = LEGACY_DB_NAME;
+let switchInFlight: Promise<void> | null = null;
+let activeActor = "المستخدم الرئيسي";
+
+export function getActiveDbName(): string {
+  return activeDbName;
+}
+
+export function setAuditActor(actor?: string): void {
+  activeActor = actor?.trim() || "المستخدم الرئيسي";
+}
+
+function userDbName(userId: string): string {
+  const safe = userId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `sajil-user-${safe}`;
+}
+
+/** فتح قاعدة مستقلة للمستخدم بعد نجاح المصادقة. */
+export async function switchUserDatabase(userId: string): Promise<void> {
+  const nextName = userDbName(userId);
+  if (activeDbName === nextName && db.isOpen()) return;
+
+  if (switchInFlight) await switchInFlight;
+  if (activeDbName === nextName && db.isOpen()) return;
+
+  switchInFlight = (async () => {
+    db.close();
+    db = new SajilDB(nextName);
+    activeDbName = nextName;
+    await initDB();
+  })();
+
+  try {
+    await switchInFlight;
+  } finally {
+    switchInFlight = null;
+  }
+}
+
+/** إغلاق قاعدة المستخدم عند تسجيل الخروج لمنع بقاء بياناته في الواجهة. */
+export function closeActiveDatabase(): void {
+  db.close();
+  db = new SajilDB(GUEST_DB_NAME);
+  activeDbName = GUEST_DB_NAME;
+  setAuditActor();
+}
 
 export async function initDB(): Promise<void> {
   const row = await db.settings.get("schemaVersion");
@@ -109,7 +163,7 @@ export const settingsService = {
 /* ====== سجل التدقيق ====== */
 export const auditService = {
   async log(action: string, entity: string, entityId?: string, details?: string): Promise<void> {
-    await db.auditLogs.add({ id: uid("log"), at: new Date().toISOString(), actor: "المستخدم الرئيسي", action, entity, entityId, details });
+    await db.auditLogs.add({ id: uid("log"), at: new Date().toISOString(), actor: activeActor, action, entity, entityId, details });
   },
   async notify(type: AppNotification["type"], title: string, message: string): Promise<void> {
     await db.notifications.add({ id: uid("ntf"), at: new Date().toISOString(), type, title, message, read: false });
@@ -421,7 +475,12 @@ export const backupService = {
       db.journalEntries.toArray(), db.templates.toArray(), db.documents.toArray(), db.auditLogs.toArray(),
       db.notifications.toArray(), db.settings.toArray(), db.ledgerAccounts.toArray(), db.ledgerEntries.toArray(),
     ]);
-    return { version: BACKUP_VERSION, parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings, ledgerAccounts, ledgerEntries };
+    const safeSettings = settings.map((row) => {
+      if (row.key !== "app" || !row.value || typeof row.value !== "object") return row;
+      const { pin: _pin, bioCredentialId: _bioCredentialId, ...portable } = row.value as Partial<AppSettings>;
+      return { key: row.key, value: portable };
+    });
+    return { version: BACKUP_VERSION, parties, debts, payments, accounts, journalEntries, templates, documents, auditLogs, notifications, settings: safeSettings, ledgerAccounts, ledgerEntries };
   },
   async importAll(data: Record<string, unknown>, replace = false): Promise<void> {
     const check = validateBackup(data);
@@ -503,7 +562,9 @@ export const localBackupService = {
     return db.backups.orderBy("at").reverse().toArray();
   },
   async create(): Promise<LocalBackup> {
-    const data = await backupService.exportAll();
+    return this.createFromData(await backupService.exportAll());
+  },
+  async createFromData(data: Record<string, unknown>): Promise<LocalBackup> {
     const json = JSON.stringify({ app: "sajil", exportedAt: new Date().toISOString(), data });
     const backup: LocalBackup = {
       id: uid("bak"),
@@ -512,11 +573,14 @@ export const localBackupService = {
       data,
     };
     await db.backups.add(backup);
-    await auditService.log("نسخة احتياطية محلية تلقائية", "backup", backup.id);
+    await auditService.log("إنشاء نسخة احتياطية محلية", "backup", backup.id);
     return backup;
   },
+  async get(id: string): Promise<LocalBackup | undefined> {
+    return db.backups.get(id);
+  },
   async restore(id: string): Promise<void> {
-    const backup = await db.backups.get(id);
+    const backup = await this.get(id);
     if (!backup) throw new Error("النسخة غير موجودة");
     await backupService.importAll(backup.data, true);
   },

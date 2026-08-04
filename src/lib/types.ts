@@ -320,7 +320,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   profileMode: "personal",
-  orgName: "مالك أحمد عبدالله علي الوصابي",
+  orgName: "",
   orgAddress: "",
   orgPhone: "",
   orgEmail: "",
@@ -334,7 +334,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoCleanupEnabled: true,
   cleanupAuditDays: 180,
   cleanupCancelledMonths: 12,
-  localBackupEnabled: true,
+  /* النسخ التلقائي معطل في الإصدار متعدد الحسابات؛ النسخ تتم يدوياً */
+  localBackupEnabled: false,
   localBackupKeep: 6,
   driveBackupKeep: 20,
 };

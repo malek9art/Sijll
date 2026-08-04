@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   Building2, Palette, ShieldCheck, DatabaseBackup, Info, KeyRound, Fingerprint,
   Download, Upload, Trash2, Save, CheckCircle2, RefreshCw, Eye, EyeOff, UserRound, CloudUpload, FolderOpen,
-  Eraser, HardDrive, CalendarClock, History,
+  Eraser, HardDrive, History,
 } from "lucide-react";
 import { db, backupService, cleanupService, initDB, localBackupService } from "@/lib/db";
-import { runAutoBackups, isAutoBackupDue } from "@/lib/backup-auto";
 import { useApp } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Switch } from "@/components/ui";
 import { cn } from "@/utils/cn";
 import {
@@ -16,7 +16,8 @@ import {
 } from "@/lib/drive";
 import { isBiometricAvailable, registerBiometric } from "@/lib/biometric";
 import { CURRENCIES, CURRENCY_KEYS, type AppSettings, type Currency, type LocalBackup } from "@/lib/types";
-import { decryptJSON, downloadJSON, fmtDate, hashPin, readFileText, toDigits, todayISO } from "@/lib/utils";
+import { fmtDate, hashPin, readFileText, toDigits, todayISO } from "@/lib/utils";
+import { backupOwnerHash, decryptBackup, encryptBackup, isEncryptedBackup } from "@/lib/backup-crypto";
 
 function Section({ icon, title, desc, children }: { icon: React.ReactNode; title: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -35,12 +36,10 @@ function Section({ icon, title, desc, children }: { icon: React.ReactNode; title
 
 export function SettingsPage() {
   const { settings, saveSettings, toast } = useApp();
+  const { user } = useAuth();
   const [form, setForm] = useState<AppSettings>(settings);
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
-  const [exportEncrypted, setExportEncrypted] = useState(false);
-  const [passphrase, setPassphrase] = useState("");
-  const [importPass, setImportPass] = useState("");
   const [resetOpen, setResetOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const arabic = settings.arabicDigits;
@@ -69,7 +68,6 @@ export function SettingsPage() {
   const [localBackups, setLocalBackups] = useState<LocalBackup[]>([]);
   const [backupBusy2, setBackupBusy2] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
-  const [autoBackupBusy, setAutoBackupBusy] = useState(false);
 
   const refreshLocalBackups = async () => {
     try {
@@ -78,9 +76,12 @@ export function SettingsPage() {
   };
 
   useEffect(() => {
-    setForm(settings);
-    setClientIdInput(settings.driveClientId || "");
+    const frame = requestAnimationFrame(() => {
+      setForm(settings);
+      setClientIdInput(settings.driveClientId || "");
+    });
     void refreshLocalBackups();
+    return () => cancelAnimationFrame(frame);
   }, [settings]);
 
   useEffect(() => {
@@ -88,24 +89,29 @@ export function SettingsPage() {
   }, []);
 
   const driveUpload = async () => {
+    if (!user) return;
     setDriveBusy("upload");
     try {
       const data = await backupService.exportAll();
-      const blob = new Blob([JSON.stringify({ app: "sajil", exportedAt: new Date().toISOString(), data }, null, 2)], { type: "application/json" });
-      await uploadBackupToDrive(blob, `sajil-backup-${todayISO()}.json`);
-      /* تطبيق سياسة الاحتفاظ: إبقاء آخر N نسخة فقط على درايف */
+      const envelope = await encryptBackup(data, user.id);
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/octet-stream" });
+      await uploadBackupToDrive(blob, `sijll-backup-${todayISO()}.sajil`, {
+        sijllApp: "sijll",
+        sijllOwnerHash: envelope.ownerHash,
+        sijllBackupVersion: String(envelope.version),
+      });
       try {
-        const files = await listDriveBackups();
+        const files = await listDriveBackups(envelope.ownerHash);
         const keep = Math.max(1, form.driveBackupKeep || 20);
         for (const f of files.slice(keep)) {
           const { deleteDriveBackup } = await import("@/lib/drive");
           await deleteDriveBackup(f.id);
         }
-        if (files.length > keep) setDriveFiles(files.slice(0, keep));
-      } catch { /* غير حرج */ }
+        setDriveFiles(files.slice(0, keep));
+      } catch { /* تنظيف النسخ القديمة غير حرج */ }
       await saveSettings({ lastAutoBackupAt: new Date().toISOString() });
       await refreshLocalBackups();
-      toast("success", "تم الرفع إلى Google Drive", "النسخة محفوظة في مجلد «سجل - نسخ احتياطية»");
+      toast("success", "تم رفع نسخة مشفرة إلى Google Drive", "لا يمكن قراءة محتوى الملف مباشرة من Drive");
     } catch (err) {
       toast("error", "تعذر الرفع إلى درايف", err instanceof Error ? err.message : undefined);
     } finally {
@@ -114,9 +120,10 @@ export function SettingsPage() {
   };
 
   const driveList = async () => {
+    if (!user) return;
     setDriveBusy("list");
     try {
-      setDriveFiles(await listDriveBackups());
+      setDriveFiles(await listDriveBackups(await backupOwnerHash(user.id)));
     } catch (err) {
       toast("error", "تعذر جلب النسخ", err instanceof Error ? err.message : undefined);
     } finally {
@@ -125,15 +132,18 @@ export function SettingsPage() {
   };
 
   const driveRestore = async (f: DriveBackupFile) => {
+    if (!user) return;
     setDriveBusy("restore");
     try {
       const text = await downloadBackupFromDrive(f.id);
-      const parsed = JSON.parse(text) as { data?: Record<string, unknown> };
-      await backupService.importAll((parsed.data || parsed) as Record<string, unknown>, true);
+      const parsed = JSON.parse(text) as unknown;
+      if (!isEncryptedBackup(parsed)) throw new Error("الملف غير مشفر بصيغة سجل المدعومة");
+      const data = await decryptBackup(parsed, user.id);
+      await backupService.importAll(data, true);
       await refreshLocalBackups();
       toast("success", "تمت الاستعادة من Google Drive", f.name);
     } catch (err) {
-      toast("error", "تعذرت الاستعادة", err instanceof Error ? err.message : "تأكد من سلامة الملف على درايف");
+      toast("error", "تعذرت الاستعادة", err instanceof Error ? err.message : "تأكد من أن النسخة تخص حسابك وسليمة");
     } finally {
       setDriveBusy("idle");
     }
@@ -155,47 +165,54 @@ export function SettingsPage() {
   const set = (k: keyof AppSettings, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
   const exportBackup = async () => {
+    if (!user) return;
     setBackupBusy("export");
     try {
       const data = await backupService.exportAll();
-      downloadJSON(`sajil-backup-${todayISO()}.json`, data, exportEncrypted, passphrase);
-      toast("success", "تم تصدير النسخة الاحتياطية", exportEncrypted ? "النسخة مشفرة بتشفير AES-256" : "نسخة JSON كاملة");
+      const envelope = await encryptBackup(data, user.id);
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `sijll-backup-${todayISO()}.sajil`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast("success", "تم تصدير نسخة مشفرة", "لا تحتاج النسخة إلى كلمة مرور إضافية عند الاستعادة بحسابك");
+    } catch (err) {
+      toast("error", "تعذر تصدير النسخة", err instanceof Error ? err.message : undefined);
     } finally {
       setBackupBusy(null);
     }
   };
 
   const importBackup = async (file: File) => {
+    if (!user) return;
     setBackupBusy("import");
     try {
-      const text = await readFileText(file);
-      let parsed: Record<string, unknown>;
-      if (text.trim().startsWith("{")) {
-        parsed = JSON.parse(text);
-      } else {
-        if (!importPass) { toast("error", "هذا الملف مشفر", "أدخل عبارة المرور المستخدمة عند التصدير"); return; }
-        parsed = JSON.parse(await decryptJSON(text, importPass));
-      }
-      const payload = parsed as { app?: string; data?: Record<string, unknown> };
-      const data = payload.data || parsed;
-      await backupService.importAll(data as Record<string, unknown>, true);
+      const parsed = JSON.parse(await readFileText(file)) as unknown;
+      if (!isEncryptedBackup(parsed)) throw new Error("هذه النسخة غير مشفرة بصيغة سجل المدعومة");
+      const data = await decryptBackup(parsed, user.id);
+      await backupService.importAll(data, true);
       await refreshLocalBackups();
-      toast("success", "تم استيراد النسخة الاحتياطية بنجاح");
+      toast("success", "تم استيراد النسخة المشفرة بنجاح");
     } catch (err) {
-      toast("error", "تعذر قراءة الملف", err instanceof Error ? err.message : "تأكد من صحة الملف أو عبارة المرور");
+      toast("error", "تعذر قراءة النسخة", err instanceof Error ? err.message : "تأكد من أن الملف يخص حسابك");
     } finally {
       setBackupBusy(null);
     }
   };
 
   const createLocalBackup = async () => {
+    if (!user) return;
     setBackupBusy2(true);
     try {
-      await localBackupService.create();
+      const data = await backupService.exportAll();
+      const envelope = await encryptBackup(data, user.id);
+      await localBackupService.createFromData(envelope as unknown as Record<string, unknown>);
       await localBackupService.applyRetention(form.localBackupKeep || 6);
       await saveSettings({ lastAutoBackupAt: new Date().toISOString() });
       await refreshLocalBackups();
-      toast("success", "تم إنشاء نسخة احتياطية محلية", "محفوظة داخل الجهاز — تعمل دون إنترنت");
+      toast("success", "تم إنشاء نسخة محلية مشفرة", "محفوظة داخل الجهاز — تعمل دون إنترنت");
     } catch (err) {
       toast("error", "تعذر إنشاء النسخة المحلية", err instanceof Error ? err.message : undefined);
     } finally {
@@ -204,9 +221,13 @@ export function SettingsPage() {
   };
 
   const restoreLocalBackup = async (b: LocalBackup) => {
+    if (!user) return;
     setBackupBusy2(true);
     try {
-      await localBackupService.restore(b.id);
+      const stored = await localBackupService.get(b.id);
+      if (!stored || !isEncryptedBackup(stored.data)) throw new Error("النسخة المحلية غير مشفرة بصيغة مدعومة");
+      const data = await decryptBackup(stored.data, user.id);
+      await backupService.importAll(data, true);
       await refreshLocalBackups();
       toast("success", "تمت الاستعادة من النسخة المحلية", fmtDate(b.at, arabic, true));
     } catch (err) {
@@ -240,20 +261,6 @@ export function SettingsPage() {
     }
   };
 
-  const runAutoBackupNow = async () => {
-    setAutoBackupBusy(true);
-    try {
-      const r = await runAutoBackups(form);
-      await refreshLocalBackups();
-      toast("success", "تم تنفيذ النسخ الاحتياطي التلقائي",
-        `محلي: ${r.local ? "نعم" : "لا"} · درايف: ${r.drive ? "نعم" : "لا"}${r.prunedDrive ? ` · حُذف ${r.prunedDrive} نسخة قديمة` : ""}`);
-    } catch (err) {
-      toast("error", "تعذر التنفيذ", err instanceof Error ? err.message : undefined);
-    } finally {
-      setAutoBackupBusy(false);
-    }
-  };
-
   return (
     <div className="animate-fade-in">
       <PageHeader title="الإعدادات" description="إدارة المنشأة، التفضيلات، الأمان، والنسخ الاحتياطي" />
@@ -282,7 +289,7 @@ export function SettingsPage() {
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={form.profileMode === "personal" ? "الاسم الكامل" : "اسم المنشأة"}>
-                <Input value={form.orgName} onChange={(e) => set("orgName", e.target.value)} placeholder={form.profileMode === "personal" ? "مثال: مالك أحمد..." : "مثال: شركة..."} />
+                <Input value={form.orgName} onChange={(e) => set("orgName", e.target.value)} placeholder={form.profileMode === "personal" ? "مثال: أحمد محمد..." : "مثال: شركة..."} />
               </Field>
               <Field label={form.profileMode === "personal" ? "المدينة" : "مدينة المقر"}>
                 <Input value={form.orgCity} onChange={(e) => set("orgCity", e.target.value)} />
@@ -411,33 +418,23 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        <Section icon={<DatabaseBackup size={18} />} title="النسخ الاحتياطي والاستعادة" desc="تصدير كامل للبيانات بصيغة JSON — مع خيار التشفير">
+        <Section icon={<DatabaseBackup size={18} />} title="النسخ الاحتياطي والاستعادة" desc="نسخ مشفرة تلقائياً بمفتاح حسابك — بدون كلمة مرور إضافية">
           <div className="space-y-4">
-            <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">
-              <input type="checkbox" checked={exportEncrypted} onChange={(e) => setExportEncrypted(e.target.checked)} className="h-4 w-4 accent-brand-600" />
-              تشفير النسخة بكلمة مرور (AES-256)
-            </label>
-            {exportEncrypted && (
-              <Field label="عبارة المرور للتشفير">
-                <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} placeholder="كلمة مرور قوية..." />
-              </Field>
-            )}
+            <p className="rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[11.5px] leading-6 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
+              كل نسخة تُشفّر داخل المتصفح قبل تنزيلها أو رفعها إلى Google Drive. لا تُقبل النسخة إلا بعد تسجيل الدخول بالحساب الذي أنشأها.
+            </p>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={exportBackup} disabled={(exportEncrypted && passphrase.length < 4) || backupBusy !== null}>
+              <Button variant="outline" onClick={exportBackup} disabled={backupBusy !== null}>
                 {backupBusy === "export" ? <RefreshCw size={15} className="animate-spin" /> : <Download size={15} />}
-                {backupBusy === "export" ? "جارٍ التصدير..." : "تصدير النسخة الاحتياطية"}
+                {backupBusy === "export" ? "جارٍ التصدير..." : "تصدير نسخة مشفرة"}
               </Button>
               <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={backupBusy !== null}>
                 {backupBusy === "import" ? <RefreshCw size={15} className="animate-spin" /> : <Upload size={15} />}
-                {backupBusy === "import" ? "جارٍ الاستيراد..." : "استيراد نسخة"}
+                {backupBusy === "import" ? "جارٍ الاستيراد..." : "استيراد نسخة مشفرة"}
               </Button>
-              <input ref={fileRef} type="file" accept=".json,.sajil" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importBackup(f); e.target.value = ""; }} />
+              <input ref={fileRef} type="file" accept=".sajil,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importBackup(f); e.target.value = ""; }} />
             </div>
-            {!exportEncrypted && (
-              <Field label="عبارة المرور (للملفات المشفرة)">
-                <Input type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)} placeholder="أدخلها فقط إذا كان الملف مشفراً" />
-              </Field>
-            )}
+            <p className="text-[11px] leading-5 text-slate-400">لا تستخدم النسخ القديمة غير المشفرة في هذا المسار؛ هذا يمنع استيراد بيانات حساب آخر بالخطأ.</p>
             <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
               <p className="mb-2 text-[13px] font-bold text-rose-600">منطقة الخطر</p>
               <Button variant="danger" size="sm" onClick={() => setResetOpen(true)}><Trash2 size={14} /> إعادة تهيئة التطبيق ومسح البيانات</Button>
@@ -483,28 +480,16 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        <Section icon={<HardDrive size={18} />} title="النسخ الاحتياطية المحلية التلقائية" desc="نسخ كاملة داخل الجهاز تُنشأ تلقائياً عند التشغيل — تعمل دون إنترنت وتُدار بسياسة احتفاظ">
+        <Section icon={<HardDrive size={18} />} title="النسخ الاحتياطية المحلية اليدوية" desc="نسخة مشفرة داخل الجهاز تُنشأ عند الطلب وتُدار بسياسة احتفاظ">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50">
               <div className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
                 <CheckCircle2 size={15} className="text-emerald-600" />
-                {settings.lastAutoBackupAt ? `آخر نسخة تلقائية: ${fmtDate(settings.lastAutoBackupAt, arabic, true)}` : "لم تُنشأ نسخة تلقائية بعد"}
+                {settings.lastAutoBackupAt ? `آخر نسخة: ${fmtDate(settings.lastAutoBackupAt, arabic, true)}` : "لم تُنشأ نسخة محلية بعد"}
               </div>
               <Button size="sm" variant="outline" onClick={createLocalBackup} disabled={backupBusy2}>
                 {backupBusy2 ? <RefreshCw size={14} className="animate-spin" /> : <HardDrive size={14} />}
-                إنشاء نسخة الآن
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50">
-              <div>
-                <p className="text-sm font-bold text-slate-700 dark:text-slate-200">النسخ التلقائي اليومي على Google Drive</p>
-                <p className="text-xs text-slate-400">
-                  {isAutoBackupDue(settings) ? "مستحق الآن — فعّل المزامنة واربط درايف لتفعيله" : "نشط — رفع يومي تلقائي مع إبقاء آخر النسخ فقط"}
-                </p>
-              </div>
-              <Button size="sm" variant="outline" onClick={runAutoBackupNow} disabled={autoBackupBusy}>
-                {autoBackupBusy ? <RefreshCw size={14} className="animate-spin" /> : <CalendarClock size={14} />}
-                تنفيذ الآن
+                إنشاء نسخة مشفرة
               </Button>
             </div>
             {localBackups.length > 0 && (
