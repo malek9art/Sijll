@@ -1,10 +1,11 @@
 /* ====== بوابة المصادقة قبل فتح بيانات المستخدم ====== */
-import { useState, type FormEvent, type ReactNode } from "react";
-import { AlertCircle, ArrowLeft, CheckCircle2, LoaderCircle, LockKeyhole, Mail, UserPlus } from "lucide-react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { AlertCircle, ArrowLeft, CheckCircle2, DatabaseBackup, LoaderCircle, LockKeyhole, Mail, Trash2, UserPlus } from "lucide-react";
 import { Logo } from "./Logo";
 import { Input } from "./ui";
 import { useAuth } from "@/lib/auth";
 import { userFromAuthResult } from "@/lib/auth";
+import { discardLegacyData, getLegacySummary, migrateLegacyData, type LegacySummary } from "@/lib/legacy-migration";
 
 function Shell({ children }: { children: ReactNode }) {
   return (
@@ -267,6 +268,115 @@ function EmailVerificationNotice({ email }: { email: string }) {
   );
 }
 
+function LegacyMigrationGate({ children }: { children: ReactNode }) {
+  const { databaseReady } = useAuth();
+  const [summary, setSummary] = useState<LegacySummary | null>(null);
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState<"migrate" | "discard" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!databaseReady) return;
+    let cancelled = false;
+    void getLegacySummary()
+      .then((value) => { if (!cancelled) { setSummary(value); setChecked(true); } })
+      .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err.message : "تعذر فحص البيانات القديمة"); setChecked(true); } });
+    return () => { cancelled = true; };
+  }, [databaseReady]);
+
+  if (!databaseReady || !checked) {
+    return (
+      <Shell>
+        <div className="rounded-3xl border border-white/10 bg-white/10 p-8 text-center text-white shadow-2xl backdrop-blur">
+          <LoaderCircle size={30} className="mx-auto animate-spin text-brand-300" />
+          <p className="mt-4 text-sm font-semibold text-slate-300">جارٍ فحص بيانات الجهاز القديمة…</p>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (error) {
+    return (
+      <Shell>
+        <div className="rounded-3xl border border-rose-300/20 bg-white/10 p-6 text-center text-white shadow-2xl backdrop-blur">
+          <AlertCircle size={28} className="mx-auto text-rose-300" />
+          <h2 className="mt-4 font-bold">تعذر فحص النسخة القديمة</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-300">{error}</p>
+          <button onClick={() => window.location.reload()} className="mt-5 rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900">إعادة المحاولة</button>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (!summary) return <>{children}</>;
+
+  const migrate = async () => {
+    setBusy("migrate");
+    setError(null);
+    try {
+      await migrateLegacyData();
+      setSummary(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر نقل البيانات القديمة");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const discard = async () => {
+    setBusy("discard");
+    setError(null);
+    try {
+      await discardLegacyData();
+      setSummary(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر حذف البيانات القديمة");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Shell>
+      <div className="rounded-3xl border border-amber-300/20 bg-white p-6 text-right shadow-2xl">
+        <div className="flex items-start gap-3">
+          <DatabaseBackup className="mt-0.5 shrink-0 text-amber-600" size={24} />
+          <div>
+            <h2 className="text-lg font-black text-slate-900">بيانات قديمة موجودة على هذا الجهاز</h2>
+            <p className="mt-2 text-sm leading-7 text-slate-600">
+              عُثر على قاعدة الإصدار السابق. لن يتم دمجها تلقائياً مع حسابك حتى لا تنتقل بيانات شخص آخر بالخطأ.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
+          {[
+            ["الأطراف", summary.parties], ["العمليات", summary.debts], ["المستندات", summary.documents], ["حركات الدفتر", summary.ledgerEntries],
+          ].map(([label, count]) => (
+            <div key={String(label)} className="rounded-xl bg-slate-50 px-3 py-3">
+              <p className="text-slate-400">{label}</p>
+              <p className="mt-1 text-lg font-black text-slate-800">{count}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs leading-6 text-amber-800">
+          المصدر القديم: <b>{summary.displayName}</b>. اختر النقل فقط إذا كانت هذه البيانات تخص حسابك الحالي.
+        </p>
+        {error && <p className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button onClick={() => void discard()} disabled={busy !== null} className="flex items-center gap-1.5 rounded-xl border border-rose-200 px-4 py-2 text-sm font-bold text-rose-700 disabled:opacity-50">
+            {busy === "discard" ? <LoaderCircle size={15} className="animate-spin" /> : <Trash2 size={15} />}
+            حذف النسخة القديمة
+          </button>
+          <button onClick={() => void migrate()} disabled={busy !== null} className="flex items-center gap-1.5 rounded-xl bg-brand-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+            {busy === "migrate" ? <LoaderCircle size={15} className="animate-spin" /> : <DatabaseBackup size={15} />}
+            نقلها إلى حسابي
+          </button>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
   const { configured, pending, online, user, offlineCandidate, databaseReady, databaseError } = useAuth();
 
@@ -306,5 +416,5 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </Shell>
     );
   }
-  return <>{children}</>;
+  return <LegacyMigrationGate>{children}</LegacyMigrationGate>;
 }
