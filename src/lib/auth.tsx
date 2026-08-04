@@ -31,6 +31,12 @@ interface StoredOfflineCredential {
 
 const OFFLINE_CREDENTIAL_KEY = "sijll:offline-credential";
 
+type NeonOtpClient = {
+  emailOtp: {
+    verifyEmail: (input: { email: string; otp: string }) => Promise<unknown>;
+  };
+};
+
 function readOfflineCredential(): StoredOfflineCredential | null {
   try {
     const raw = localStorage.getItem(OFFLINE_CREDENTIAL_KEY);
@@ -76,6 +82,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<unknown>;
   signUp: (name: string, email: string, password: string) => Promise<unknown>;
   requestPasswordReset: (email: string) => Promise<unknown>;
+  verifyEmail: (email: string, otp: string) => Promise<unknown>;
   resendVerification: (email: string) => Promise<unknown>;
   rememberOfflineCredential: (user: AuthUser, secret: string) => Promise<void>;
   unlockOffline: (secret: string) => Promise<void>;
@@ -156,6 +163,7 @@ function ConfiguredAuthProvider({ children }: { children: ReactNode }) {
     signIn: (email, password) => authClient.signIn.email({ email, password }),
     signUp: (name, email, password) => authClient.signUp.email({ name, email, password }),
     requestPasswordReset: (email) => authClient.requestPasswordReset({ email, redirectTo: `${window.location.origin}${window.location.pathname}` }),
+    verifyEmail: (email, otp) => (authClient as unknown as NeonOtpClient).emailOtp.verifyEmail({ email, otp }),
     resendVerification: (email) => authClient.sendVerificationEmail({ email, callbackURL: window.location.href }),
     rememberOfflineCredential: async (offlineIdentity, secret) => {
       if (!secret) return;
@@ -195,6 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn: async () => undefined,
       signUp: async () => undefined,
       requestPasswordReset: async () => undefined,
+      verifyEmail: async () => undefined,
       resendVerification: async () => undefined,
       rememberOfflineCredential: async () => undefined,
       unlockOffline: async () => undefined,

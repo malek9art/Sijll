@@ -47,7 +47,7 @@ function ConfigRequired() {
   );
 }
 
-type AuthMode = "signin" | "signup" | "forgot";
+type AuthMode = "signin" | "signup" | "forgot" | "verify";
 
 function errorMessage(result: unknown): string | undefined {
   if (!result || typeof result !== "object") return undefined;
@@ -56,11 +56,12 @@ function errorMessage(result: unknown): string | undefined {
 }
 
 function AuthScreen() {
-  const { signIn, signUp, requestPasswordReset, rememberOfflineCredential } = useAuth();
+  const { signIn, signUp, verifyEmail, resendVerification, requestPasswordReset, rememberOfflineCredential } = useAuth();
   const [mode, setMode] = useState<AuthMode>("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -69,6 +70,25 @@ function AuthScreen() {
     setMode(next);
     setMessage(null);
     setSuccess(null);
+    if (next !== "verify") setOtp("");
+  };
+
+  const resend = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return;
+    setBusy(true);
+    setMessage(null);
+    setSuccess(null);
+    try {
+      const result = await resendVerification(cleanEmail);
+      const error = errorMessage(result);
+      if (error) setMessage(error);
+      else setSuccess("تمت إعادة إرسال رمز التحقق إلى بريدك الإلكتروني.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "تعذر إعادة إرسال الرمز");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async (event: FormEvent) => {
@@ -81,11 +101,39 @@ function AuthScreen() {
       setMessage("أدخل بريداً إلكترونياً صحيحاً");
       return;
     }
+
+    if (mode === "verify") {
+      const cleanOtp = otp.replace(/\D/g, "");
+      if (cleanOtp.length !== 6) {
+        setMessage("أدخل رمز التحقق المكوّن من 6 أرقام");
+        return;
+      }
+      setBusy(true);
+      try {
+        const result = await verifyEmail(cleanEmail, cleanOtp);
+        const error = errorMessage(result);
+        if (error) setMessage(error);
+        else {
+          const identity = userFromAuthResult(result, { email: cleanEmail, name: name.trim() });
+          if (identity && password) await rememberOfflineCredential(identity, password);
+          setSuccess("تم التحقق من البريد بنجاح. يمكنك الآن تسجيل الدخول.");
+          setMode("signin");
+          setOtp("");
+          setPassword("");
+        }
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "رمز التحقق غير صحيح أو منتهي الصلاحية");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     if (mode === "signup" && !name.trim()) {
       setMessage("أدخل الاسم الذي سيظهر داخل النظام");
       return;
     }
-    if (mode !== "forgot" && password.length < 8) {
+    if ((mode === "signin" || mode === "signup") && password.length < 8) {
       setMessage("يجب أن تتكون كلمة المرور من 8 أحرف أو أرقام على الأقل");
       return;
     }
@@ -105,9 +153,10 @@ function AuthScreen() {
         const error = errorMessage(result);
         if (error) setMessage(error);
         else {
-          setSuccess("تم إنشاء الحساب. تحقق من بريدك الإلكتروني قبل الدخول ثم سجّل الدخول.");
-          setMode("signin");
-          setPassword("");
+          setEmail(cleanEmail);
+          setOtp("");
+          setSuccess("تم إنشاء الحساب. أدخل رمز التحقق المرسل إلى بريدك الإلكتروني.");
+          setMode("verify");
         }
       } else {
         const result = await requestPasswordReset(cleanEmail);
@@ -122,19 +171,19 @@ function AuthScreen() {
     }
   };
 
-  const title = mode === "signin" ? "تسجيل الدخول" : mode === "signup" ? "إنشاء حساب جديد" : "استعادة كلمة المرور";
+  const title = mode === "signin" ? "تسجيل الدخول" : mode === "signup" ? "إنشاء حساب جديد" : mode === "verify" ? "التحقق من البريد" : "استعادة كلمة المرور";
 
   return (
     <Shell>
       <div className="rounded-3xl border border-white/10 bg-white p-6 shadow-2xl sm:p-7">
         <div className="mb-5 flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-50 text-brand-700">
-            {mode === "signup" ? <UserPlus size={20} /> : mode === "forgot" ? <Mail size={20} /> : <LockKeyhole size={20} />}
+            {mode === "signup" ? <UserPlus size={20} /> : mode === "signin" ? <LockKeyhole size={20} /> : <Mail size={20} />}
           </span>
           <div>
             <h2 className="text-lg font-black text-slate-900">{title}</h2>
             <p className="text-xs text-slate-500">
-              {mode === "forgot" ? "سنرسل رابط الاستعادة إلى البريد المسجل" : "بياناتك المحلية تُفتح بعد مصادقة حسابك"}
+              {mode === "forgot" ? "سنرسل تعليمات الاستعادة إلى البريد المسجل" : mode === "verify" ? "أدخل الرمز المكوّن من 6 أرقام الذي وصلك بالبريد" : "بياناتك المحلية تُفتح بعد مصادقة حسابك"}
             </p>
           </div>
         </div>
@@ -161,9 +210,19 @@ function AuthScreen() {
           )}
           <label className="block">
             <span className="mb-1.5 block text-sm font-semibold text-slate-700">البريد الإلكتروني</span>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" dir="ltr" autoComplete="email" />
+            {mode === "verify" ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left text-sm font-semibold text-slate-700" dir="ltr">{email}</div>
+            ) : (
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" dir="ltr" autoComplete="email" />
+            )}
           </label>
-          {mode !== "forgot" && (
+          {mode === "verify" && (
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold text-slate-700">رمز التحقق</span>
+              <Input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" dir="ltr" className="text-center text-xl tracking-[0.45em]" autoFocus />
+            </label>
+          )}
+          {(mode === "signin" || mode === "signup") && (
             <label className="block">
               <span className="mb-1.5 block text-sm font-semibold text-slate-700">كلمة المرور</span>
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="8 أحرف أو أرقام على الأقل" dir="ltr" autoComplete={mode === "signup" ? "new-password" : "current-password"} />
@@ -171,8 +230,13 @@ function AuthScreen() {
           )}
           <button type="submit" disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 text-sm font-bold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60">
             {busy && <LoaderCircle size={16} className="animate-spin" />}
-            {mode === "signin" ? "دخول آمن" : mode === "signup" ? "إنشاء الحساب" : "إرسال رابط الاستعادة"}
+            {mode === "signin" ? "دخول آمن" : mode === "signup" ? "إنشاء الحساب" : mode === "verify" ? "تحقق من الرمز" : "إرسال رابط الاستعادة"}
           </button>
+          {mode === "verify" && (
+            <button type="button" onClick={() => void resend()} disabled={busy} className="w-full text-center text-xs font-bold text-brand-700 hover:underline disabled:opacity-50">
+              إعادة إرسال رمز التحقق
+            </button>
+          )}
         </form>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 text-xs font-semibold">
@@ -235,15 +299,41 @@ function OfflineUnlock({ user }: { user: { name: string; email: string } }) {
 }
 
 function EmailVerificationNotice({ email }: { email: string }) {
-  const { resendVerification, signOut } = useAuth();
+  const { verifyEmail, resendVerification, signOut } = useAuth();
+  const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const verify = async (event: FormEvent) => {
+    event.preventDefault();
+    const cleanOtp = otp.replace(/\D/g, "");
+    if (cleanOtp.length !== 6) {
+      setError("أدخل رمز التحقق المكوّن من 6 أرقام");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await verifyEmail(email, cleanOtp);
+      const message = errorMessage(result);
+      if (message) setError(message);
+      else setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "رمز التحقق غير صحيح أو منتهي الصلاحية");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const resend = async () => {
     setBusy(true);
+    setError(null);
     try {
       const result = await resendVerification(email);
-      if (!errorMessage(result)) setSent(true);
+      const message = errorMessage(result);
+      if (message) setError(message);
+      else setSent(true);
     } finally {
       setBusy(false);
     }
@@ -254,14 +344,20 @@ function EmailVerificationNotice({ email }: { email: string }) {
       <div className="rounded-3xl border border-white/10 bg-white p-6 text-center shadow-2xl">
         <Mail size={28} className="mx-auto text-brand-700" />
         <h2 className="mt-4 text-lg font-black text-slate-900">تحقق من بريدك الإلكتروني</h2>
-        <p className="mt-2 text-sm leading-7 text-slate-500">أرسلنا رسالة تحقق إلى:</p>
+        <p className="mt-2 text-sm leading-7 text-slate-500">أرسلنا رمزاً مكوناً من 6 أرقام إلى:</p>
         <p className="mt-1 font-bold text-slate-800" dir="ltr">{email}</p>
-        {sent && <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">تمت إعادة إرسال رسالة التحقق.</p>}
-        <div className="mt-5 flex justify-center gap-2">
-          <button onClick={() => void resend()} disabled={busy} className="rounded-xl bg-brand-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
-            {busy ? "جارٍ الإرسال..." : "إعادة إرسال"}
+        {error && <p className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+        {sent && <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">تم إرسال/تأكيد الرمز بنجاح.</p>}
+        <form onSubmit={verify} className="mt-5 space-y-3">
+          <Input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" dir="ltr" autoFocus className="text-center text-xl tracking-[0.45em]" />
+          <button type="submit" disabled={busy || otp.length !== 6} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 text-sm font-bold text-white disabled:opacity-50">
+            {busy ? <LoaderCircle size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+            تأكيد رمز التحقق
           </button>
-          <button onClick={() => void signOut()} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600">تسجيل الخروج</button>
+        </form>
+        <div className="mt-4 flex justify-center gap-3 text-xs font-bold">
+          <button onClick={() => void resend()} disabled={busy} className="text-brand-700 hover:underline disabled:opacity-50">إعادة إرسال الرمز</button>
+          <button onClick={() => void signOut()} className="text-slate-500 hover:text-rose-600">تسجيل الخروج</button>
         </div>
       </div>
     </Shell>
