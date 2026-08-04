@@ -411,7 +411,8 @@ function LegacyMigrationGate({ children }: { children: ReactNode }) {
     setError(null);
     try {
       await migrateLegacyData();
-      setSummary(null);
+      /* أعد تشغيل البوابة لضمان فتح قاعدة الحساب بعد انتهاء الترحيل وعدم إعادة فحص الحالة القديمة. */
+      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "تعذر نقل البيانات القديمة");
     } finally {
@@ -424,7 +425,7 @@ function LegacyMigrationGate({ children }: { children: ReactNode }) {
     setError(null);
     try {
       await discardLegacyData();
-      setSummary(null);
+      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "تعذر حذف البيانات القديمة");
     } finally {
