@@ -20,7 +20,7 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  emailVerified?: boolean;
+  emailVerified: boolean;
 }
 
 interface StoredOfflineCredential {
@@ -100,7 +100,8 @@ function ConfiguredAuthProvider({ children }: { children: ReactNode }) {
         id: rawUser.id,
         name: rawUser.name || rawUser.email,
         email: rawUser.email,
-        emailVerified: rawUser.emailVerified,
+        /* لا نفتح مساحة البيانات إلا بإشارة صريحة من Neon بأن البريد مؤكد. */
+        emailVerified: rawUser.emailVerified === true,
       }
     : null;
   const [offlineUser, setOfflineUser] = useState<AuthUser | null>(null);
@@ -132,7 +133,7 @@ function ConfiguredAuthProvider({ children }: { children: ReactNode }) {
     setDatabaseReady(false);
     setDatabaseError(null);
 
-    if (!userId || user?.emailVerified === false) {
+    if (!userId || user?.emailVerified !== true) {
       closeActiveDatabase();
       return () => { cancelled = true; };
     }
@@ -181,8 +182,11 @@ function ConfiguredAuthProvider({ children }: { children: ReactNode }) {
       clearOfflineCredential();
       setOfflineUser(null);
       setOfflineCandidate(null);
-      await authClient.signOut();
-      closeActiveDatabase();
+      try {
+        await authClient.signOut();
+      } finally {
+        closeActiveDatabase();
+      }
     },
   }), [databaseError, databaseReady, offlineCandidate, offlineUser, online, onlineUser, sessionState.isPending, user]);
 
@@ -232,6 +236,6 @@ export function userFromAuthResult(result: unknown, fallback: { email: string; n
     id: raw.id,
     email: raw.email || fallback.email,
     name: raw.name || fallback.name || fallback.email,
-    emailVerified: raw.emailVerified,
+    emailVerified: raw.emailVerified === true,
   };
 }

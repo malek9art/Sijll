@@ -6,6 +6,7 @@ import { Input } from "./ui";
 import { useAuth } from "@/lib/auth";
 import { userFromAuthResult } from "@/lib/auth";
 import { discardLegacyData, getLegacySummary, migrateLegacyData, type LegacySummary } from "@/lib/legacy-migration";
+import { isValidOtp, normalizeOtp } from "@/lib/otp";
 
 function Shell({ children }: { children: ReactNode }) {
   return (
@@ -103,8 +104,8 @@ function AuthScreen() {
     }
 
     if (mode === "verify") {
-      const cleanOtp = otp.replace(/\D/g, "");
-      if (cleanOtp.length !== 6) {
+      const cleanOtp = normalizeOtp(otp);
+      if (!isValidOtp(cleanOtp)) {
         setMessage("أدخل رمز التحقق المكوّن من 6 أرقام");
         return;
       }
@@ -115,11 +116,9 @@ function AuthScreen() {
         if (error) setMessage(error);
         else {
           const identity = userFromAuthResult(result, { email: cleanEmail, name: name.trim() });
-          if (identity && password) await rememberOfflineCredential(identity, password);
-          setSuccess("تم التحقق من البريد بنجاح. يمكنك الآن تسجيل الدخول.");
-          setMode("signin");
-          setOtp("");
-          setPassword("");
+          if (identity?.emailVerified === true && password) await rememberOfflineCredential(identity, password);
+          setSuccess("تم التحقق من البريد بنجاح. جارٍ فتح حسابك…");
+          window.setTimeout(() => window.location.reload(), 450);
         }
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "رمز التحقق غير صحيح أو منتهي الصلاحية");
@@ -146,7 +145,13 @@ function AuthScreen() {
         if (error) setMessage(error);
         else {
           const identity = userFromAuthResult(result, { email: cleanEmail });
-          if (identity) await rememberOfflineCredential(identity, password);
+          if (identity?.emailVerified === true) await rememberOfflineCredential(identity, password);
+          else {
+            setEmail(cleanEmail);
+            setOtp("");
+            setSuccess("الحساب يحتاج إلى تأكيد البريد. أدخل رمز التحقق المرسل إليك.");
+            setMode("verify");
+          }
         }
       } else if (mode === "signup") {
         const result = await signUp(name.trim(), cleanEmail, password);
@@ -219,7 +224,7 @@ function AuthScreen() {
           {mode === "verify" && (
             <label className="block">
               <span className="mb-1.5 block text-sm font-semibold text-slate-700">رمز التحقق</span>
-              <Input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" dir="ltr" className="text-center text-xl tracking-[0.45em]" autoFocus />
+              <Input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(normalizeOtp(e.target.value))} placeholder="000000" dir="ltr" className="text-center text-xl tracking-[0.45em]" autoFocus />
             </label>
           )}
           {(mode === "signin" || mode === "signup") && (
@@ -307,8 +312,8 @@ function EmailVerificationNotice({ email }: { email: string }) {
 
   const verify = async (event: FormEvent) => {
     event.preventDefault();
-    const cleanOtp = otp.replace(/\D/g, "");
-    if (cleanOtp.length !== 6) {
+    const cleanOtp = normalizeOtp(otp);
+    if (!isValidOtp(cleanOtp)) {
       setError("أدخل رمز التحقق المكوّن من 6 أرقام");
       return;
     }
@@ -318,7 +323,10 @@ function EmailVerificationNotice({ email }: { email: string }) {
       const result = await verifyEmail(email, cleanOtp);
       const message = errorMessage(result);
       if (message) setError(message);
-      else setSent(true);
+      else {
+        setSent(true);
+        window.setTimeout(() => window.location.reload(), 450);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "رمز التحقق غير صحيح أو منتهي الصلاحية");
     } finally {
@@ -349,8 +357,8 @@ function EmailVerificationNotice({ email }: { email: string }) {
         {error && <p className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
         {sent && <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">تم إرسال/تأكيد الرمز بنجاح.</p>}
         <form onSubmit={verify} className="mt-5 space-y-3">
-          <Input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" dir="ltr" autoFocus className="text-center text-xl tracking-[0.45em]" />
-          <button type="submit" disabled={busy || otp.length !== 6} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 text-sm font-bold text-white disabled:opacity-50">
+          <Input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(normalizeOtp(e.target.value))} placeholder="000000" dir="ltr" autoFocus className="text-center text-xl tracking-[0.45em]" />
+          <button type="submit" disabled={busy || !isValidOtp(otp)} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 text-sm font-bold text-white disabled:opacity-50">
             {busy ? <LoaderCircle size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
             تأكيد رمز التحقق
           </button>
@@ -490,7 +498,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
   if (!user && !online && offlineCandidate) return <OfflineUnlock user={offlineCandidate} />;
   if (!user) return <AuthScreen />;
-  if (user.emailVerified === false) return <EmailVerificationNotice email={user.email} />;
+  if (user.emailVerified !== true) return <EmailVerificationNotice email={user.email} />;
   if (databaseError) {
     return (
       <Shell>
