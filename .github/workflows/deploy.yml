@@ -2,7 +2,10 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - arena/019fcd2c-sijll
+
   workflow_dispatch:
 
 permissions:
@@ -15,24 +18,48 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      VITE_NEON_AUTH_URL: ${{ secrets.VITE_NEON_AUTH_URL }}
+      VITE_NEON_DATA_API_URL: ${{ secrets.VITE_NEON_DATA_API_URL }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
       - name: Install dependencies
-        # --legacy-peer-deps ضروري: تعارض تبعيات بين @eslint/js@10 و eslint@9
-        run: npm ci --no-audit --no-fund --legacy-peer-deps || npm install --no-audit --no-fund --legacy-peer-deps
+        run: npm ci --no-audit --no-fund
 
-      - name: Build
+      - name: Validate Neon configuration
+        shell: bash
+        run: |
+          if [ -z "${VITE_NEON_AUTH_URL:-}" ]; then
+            echo "::error::Missing repository secret: VITE_NEON_AUTH_URL"
+            exit 1
+          fi
+
+          if [ -z "${VITE_NEON_DATA_API_URL:-}" ]; then
+            echo "::error::Missing repository secret: VITE_NEON_DATA_API_URL"
+            exit 1
+          fi
+
+      - name: TypeScript validation
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npm test -- --run
+
+      - name: Build production application
         run: npm run build
 
-      - name: Add SPA fallback and Jekyll bypass
+      - name: Add GitHub Pages fallback
         run: |
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
@@ -44,5 +71,6 @@ jobs:
           publish_dir: ./dist
           publish_branch: gh-pages
           enable_jekyll: false
+          force_orphan: false
           user_name: "sajil-bot"
           user_email: "sajil@users.noreply.github.com"
