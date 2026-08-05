@@ -23,6 +23,7 @@ export function VerifyPage({ number }: { number: string }) {
   const route = useHashRoute();
   const arabic = settings.arabicDigits;
   const doc = useLiveQuery(() => documentsService.byNumber(number), [number]);
+  const paperOnly = doc?.printProfile?.defaultMode === "paper";
   const [qr, setQr] = useState("");
   const [verifyUrl, setVerifyUrl] = useState("");
   const [copied, setCopied] = useState(false);
@@ -59,12 +60,16 @@ export function VerifyPage({ number }: { number: string }) {
   const verifyState = embedded ? embeddedOk : null;
 
   useEffect(() => {
-    if (!doc) return;
+    if (!doc || paperOnly) {
+      setVerifyUrl("");
+      setQr("");
+      return;
+    }
     buildDocVerifyUrl(doc, settings.orgName, doc.signatures?.length || 0)
       .then((url) => { setVerifyUrl(url); return QRCode.toDataURL(url, { width: 132, margin: 1 }); })
       .then(setQr)
       .catch(() => setQr(""));
-  }, [doc, settings.orgName]);
+  }, [doc, paperOnly, settings.orgName]);
 
   const copyUrl = async () => {
     if (!verifyUrl) return;
@@ -90,9 +95,9 @@ export function VerifyPage({ number }: { number: string }) {
               <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
                 <BadgeCheck size={30} />
               </div>
-              <p className="mt-3 text-lg font-black text-emerald-600 dark:text-emerald-400">مستند صحيح وموثق</p>
-              <p className="mt-1 text-xs text-slate-400">رقم التحقق: {toDigits(doc.number, arabic)}</p>
-              {qr && <img src={qr} alt="QR" className="mx-auto mt-4 h-24 w-24" />}
+              <p className={`mt-3 text-lg font-black ${paperOnly ? "text-slate-600 dark:text-slate-300" : "text-emerald-600 dark:text-emerald-400"}`}>{paperOnly ? "نسخة ورقية بلا توثيق إلكتروني" : "مستند صحيح وموثق"}</p>
+              <p className="mt-1 text-xs text-slate-400">رقم المستند: {toDigits(doc.number, arabic)}</p>
+              {!paperOnly && qr && <img src={qr} alt="QR" className="mx-auto mt-4 h-24 w-24" />}
               <div className="mt-5 space-y-2.5 rounded-xl bg-slate-50 p-4 text-right text-[13px] dark:bg-slate-800/60">
                 <p className="flex justify-between"><span className="text-slate-400">نوع المستند</span><b>{DOC_TYPES[doc.type].icon} {DOC_TYPES[doc.type].label}</b></p>
                 <p className="flex justify-between"><span className="text-slate-400">العنوان</span><b className="max-w-52 truncate">{doc.title}</b></p>

@@ -225,7 +225,7 @@ export function Dashboard() {
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
             <p className="text-sm font-medium text-brand-100">{greeting} 👋</p>
-            <h2 className="mt-1 truncate text-xl font-black sm:text-2xl">{settings.orgName}</h2>
+            <h2 className="mt-1 truncate text-xl font-black sm:text-2xl">{settings.orgName || "مساحتك الشخصية"}</h2>
             <p className="mt-1 text-[12px] text-brand-100/85">{fmtDate(todayISO(), arabic)} الموافق {hijriDate(todayISO())}</p>
             <p className="mt-3 max-w-xl text-[13px] leading-6 text-brand-100/90">
               صافي مركزك المالي: <b className="text-white">{fmtMoney(stats.net, base, arabic)}</b>
@@ -470,7 +470,7 @@ export function Dashboard() {
                       {d.status === "final" ? "معتمد" : "مسودة"}
                     </Badge>
                     <button title="طباعة / PDF" onClick={() => navigate(`print/doc/${d.id}`)} className="rounded-lg p-2 text-slate-400 hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-slate-800 cursor-pointer"><Printer size={14} /></button>
-                    <button title="التحقق بالرمز QR" onClick={() => navigate(`verify/${d.number}`)} className="rounded-lg p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-slate-800 cursor-pointer"><QrCode size={14} /></button>
+                    {d.printProfile?.defaultMode === "paper" ? <Badge className="bg-slate-100 text-slate-500 ring-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700">ورقي</Badge> : <button title="التحقق بالرمز QR" onClick={() => navigate(`verify/${d.number}`)} className="rounded-lg p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-slate-800 cursor-pointer"><QrCode size={14} /></button>}
                   </div>
                 </div>
               ))}
