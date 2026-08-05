@@ -470,7 +470,7 @@ export function Dashboard() {
                       {d.status === "final" ? "معتمد" : "مسودة"}
                     </Badge>
                     <button title="طباعة / PDF" onClick={() => navigate(`print/doc/${d.id}`)} className="rounded-lg p-2 text-slate-400 hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-slate-800 cursor-pointer"><Printer size={14} /></button>
-                    <button title="التحقق بالرمز QR" onClick={() => navigate(`verify/${d.number}`)} className="rounded-lg p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-slate-800 cursor-pointer"><QrCode size={14} /></button>
+                    {d.printProfile?.defaultMode === "paper" ? <Badge className="bg-slate-100 text-slate-500 ring-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700">ورقي</Badge> : <button title="التحقق بالرمز QR" onClick={() => navigate(`verify/${d.number}`)} className="rounded-lg p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-slate-800 cursor-pointer"><QrCode size={14} /></button>}
                   </div>
                 </div>
               ))}

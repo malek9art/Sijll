@@ -193,11 +193,58 @@ export const DOC_TYPES: Record<DocType, { label: string; icon: string }> = {
 
 export const DOC_TYPE_KEYS = Object.keys(DOC_TYPES) as DocType[];
 
+export type TemplateVariableType = "text" | "multiline" | "number" | "currency" | "date" | "party" | "witness" | "select" | "boolean";
+export type TemplateVariableSource = "system" | "document" | "party" | "manual";
+
+export interface TemplateVariable {
+  key: string;
+  label: string;
+  type: TemplateVariableType;
+  source: TemplateVariableSource;
+  required: boolean;
+  defaultValue?: string;
+  options?: string[];
+  order: number;
+}
+
+export type DocumentPrintMode = "paper" | "digital";
+
+export interface TemplatePrintProfile {
+  defaultMode: DocumentPrintMode;
+  showLogo: boolean;
+  showSystemHeader: boolean;
+  showSystemFooter: boolean;
+  showQr: boolean;
+  showDigitalVerification: boolean;
+  signatureMode: "manual" | "biometric" | "both";
+  paperSize: "A4";
+}
+
+export const DEFAULT_TEMPLATE_PRINT_PROFILE: TemplatePrintProfile = {
+  defaultMode: "digital",
+  showLogo: true,
+  showSystemHeader: true,
+  showSystemFooter: true,
+  showQr: true,
+  showDigitalVerification: true,
+  signatureMode: "both",
+  paperSize: "A4",
+};
+
 export interface DocTemplate {
   id: string;
   name: string;
   type: DocType;
   content: string;
+  /** Tiptap HTML/JSON are optional to preserve old plain-text templates. */
+  editorHtml?: string;
+  editorJson?: Record<string, unknown>;
+  variables?: TemplateVariable[];
+  printProfile?: TemplatePrintProfile;
+  description?: string;
+  version?: number;
+  updatedAt?: string;
+  archivedAt?: string;
   isDefault: boolean;
   isBuiltin: boolean;
   createdAt: string;
@@ -252,7 +299,17 @@ export interface LegalDoc {
   dueDate?: string;
   /** سبب الالتزام (اختياري — يُستبدل في القالب {{debt_reason}}) */
   reason?: string;
-  body: string; // نص القالب مع العناصر النائبة
+  body: string; // النص القديم/النصي للتوافق
+  /** نسخة HTML المنسقة من المحرر الاحترافي */
+  bodyHtml?: string;
+  /** حالة محرر Tiptap المهيكلة */
+  bodyJson?: Record<string, unknown>;
+  /** القيم التي أدخلها المستخدم للمتغيرات وقت إنشاء المستند */
+  variableValues?: Record<string, string>;
+  /** نسخة القالب التي أُنشئ منها المستند */
+  templateVersion?: number;
+  /** نمط العرض والطباعة لهذا المستند */
+  printProfile?: TemplatePrintProfile;
   parties: DocParty[];
   /** التواقيع المُلحقة (بيومترية عبر حساس البصمة أو يدوية) */
   signatures?: DocSignature[];

@@ -1,4 +1,5 @@
 /* ====== محرك الطباعة الاحترافي A4 ====== */
+import DOMPurify from "dompurify";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import QRCode from "qrcode";
@@ -11,8 +12,9 @@ import { Logo } from "@/components/Logo";
 import { downloadPDF, sharePDFviaWhatsApp } from "@/lib/pdf";
 import { signWithBiometric } from "@/lib/biometric";
 import { fingerprintDataUrl } from "@/lib/fingerprint";
-import { CURRENCIES, DEBT_TYPES, DOC_TYPES, PAYMENT_METHODS, type Debt, type JournalEntry, type Payment } from "@/lib/types";
-import { amountToWordsAr, buildDocVerifyFields, buildDocVerifyUrl, computeDocDigest, currencySymbol, fmtDate, fmtMoney, hijriDate, toBase, toDigits, todayISO } from "@/lib/utils";
+import { CURRENCIES, DEFAULT_TEMPLATE_PRINT_PROFILE, DEBT_TYPES, DOC_TYPES, PAYMENT_METHODS, type Debt, type JournalEntry, type Payment, type TemplatePrintProfile } from "@/lib/types";
+import { amountToWordsAr, buildDocVerifyFields, buildDocVerifyUrl, computeDocDigest, currencySymbol, fmtDate, fmtMoney, toBase, toDigits, todayISO } from "@/lib/utils";
+import { normalizePrintProfile, resolvedDocumentHtml } from "@/lib/document-template";
 
 export function PrintPage() {
   const route = useHashRoute();
@@ -111,8 +113,9 @@ export function PrintPage() {
 }
 
 /* ====== الترويسة ====== */
-function SheetHeader({ sub, chips }: { sub?: string; chips?: string[] }) {
+function SheetHeader({ sub, chips, profile = DEFAULT_TEMPLATE_PRINT_PROFILE }: { sub?: string; chips?: string[]; profile?: TemplatePrintProfile }) {
   const { settings } = useApp();
+  if (!profile.showSystemHeader) return null;
   const lines: string[] = [];
   if (settings.orgAddress) lines.push(settings.orgCity ? `${settings.orgAddress} — ${settings.orgCity}` : settings.orgAddress);
   const contact: string[] = [];
@@ -133,18 +136,21 @@ function SheetHeader({ sub, chips }: { sub?: string; chips?: string[] }) {
             </div>
           )}
         </div>
-        <div className="shrink-0 text-center">
-          <Logo size={58} />
-          <p className="mt-1 text-[8.5px] font-bold text-slate-500">منصة سجل</p>
-        </div>
+        {profile.showLogo && (
+          <div className="shrink-0 text-center">
+            <Logo size={58} />
+            <p className="mt-1 text-[8.5px] font-bold text-slate-500">منصة سجل</p>
+          </div>
+        )}
       </div>
       {sub && <p className="mt-1.5 text-left text-[9.5px] font-semibold text-slate-500">{sub}</p>}
     </div>
   );
 }
 
-function SheetFooter() {
+function SheetFooter({ profile = DEFAULT_TEMPLATE_PRINT_PROFILE }: { profile?: TemplatePrintProfile } = {}) {
   const { settings } = useApp();
+  if (!profile.showSystemFooter) return null;
   return (
     <div className="sheet-foot avoid-break">
       <p>
@@ -157,11 +163,11 @@ function SheetFooter() {
   );
 }
 
-function Sheet({ children, title }: { children: ReactNode; title: string }) {
+function Sheet({ children, title, paper = false }: { children: ReactNode; title: string; paper?: boolean }) {
   const { settings } = useApp();
   return (
     <div className="print-root">
-      <div className="sheet" data-title={title} data-org={settings.orgName}>
+      <div className={`sheet ${paper ? "document-paper-mode" : ""}`} data-title={title} data-org={paper ? undefined : settings.orgName}>
         {children}
       </div>
     </div>
@@ -192,6 +198,8 @@ function DocSheet({ id }: { id: string }) {
   const doc = useLiveQuery(() => db.documents.get(id), [id]);
   const party = useLiveQuery(() => (doc?.partyId ? db.parties.get(doc.partyId) : undefined), [doc?.partyId]);
   const arabic = settings.arabicDigits;
+  const profile = normalizePrintProfile(doc?.printProfile);
+  const paperMode = profile.defaultMode === "paper";
   const [verifyUrl, setVerifyUrl] = useState("");
   const [signOpen, setSignOpen] = useState(false);
   const [signRole, setSignRole] = useState("الطرف الثاني");
@@ -218,9 +226,12 @@ function DocSheet({ id }: { id: string }) {
 
   /* رابط صفحة التحقق المستقلة — يُضمَّن في رمز QR مع بصمة المستند الرقمية */
   useEffect(() => {
-    if (!doc) return;
+    if (!doc || !profile.showQr || !profile.showDigitalVerification) {
+      setVerifyUrl("");
+      return;
+    }
     buildDocVerifyUrl(doc, settings.orgName, doc.signatures?.length || 0).then(setVerifyUrl).catch(() => setVerifyUrl(""));
-  }, [doc, settings.orgName]);
+  }, [doc, settings.orgName, profile.showQr, profile.showDigitalVerification]);
 
   /* فتح نافذة التوثيق مع تهيئة اسم الموقّع حسب صفته */
   const openSignModal = (role: string) => {
@@ -264,28 +275,11 @@ function DocSheet({ id }: { id: string }) {
 
   const bodyHtml = useMemo(() => {
     if (!doc) return "";
-    const ctx: Record<string, string> = {
-      org_name: settings.orgName, org_address: settings.orgAddress, org_phone: settings.orgPhone,
-      org_license: settings.orgLicense, org_city: settings.orgCity,
-      party_name: party?.name || "________________", party_id: party?.idNumber || "________________",
-      party_phone: party?.phone || "________________", party_address: party?.address || "________________",
-      party_nationality: party?.nationality || "يمنية",
-      amount: doc.amount ? `${fmtMoney(doc.amount, doc.currency, arabic)}` : "________________",
-      amount_words: doc.amount ? amountToWordsAr(doc.amount, CURRENCIES[doc.currency].name) : "________________",
-      currency: CURRENCIES[doc.currency].label,
-      date_gregorian: fmtDate(doc.date, arabic), date_hijri: hijriDate(doc.date),
-      due_date: doc.dueDate ? fmtDate(doc.dueDate, arabic) : "________________",
-      debt_reason: doc.reason || "________________",
-      witness1: doc.parties.find((p) => p.role.includes("الشاهد الأول"))?.name || "________________",
-      witness2: doc.parties.find((p) => p.role.includes("الشاهد الثاني"))?.name || "________________",
-      doc_number: toDigits(doc.number, arabic),
-    };
-    return doc.body.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => ctx[k] ?? "________________");
+    return resolvedDocumentHtml(doc, party, settings, arabic);
   }, [doc, party, settings, arabic]);
 
   if (!doc) return <div className="py-20 text-center text-slate-500">جاري تحميل المستند...</div>;
 
-  const paragraphs = bodyHtml.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const debtor = doc.parties.find((p) => p.role.includes("الثاني")) || party;
   const signatories: { role: string; name: string }[] = [
     { role: "الطرف الأول", name: settings.orgName },
@@ -294,35 +288,41 @@ function DocSheet({ id }: { id: string }) {
   ];
 
   return (
-    <Sheet title={doc.title}>
+    <Sheet title={doc.title} paper={paperMode}>
       <SheetHeader
+        profile={profile}
         sub={`رقم المستند: ${toDigits(doc.number, arabic)} — تاريخ الإصدار: ${fmtDate(doc.createdAt, arabic, true)}`}
         chips={[DOC_TYPES[doc.type].label, `رقم ${doc.number}`, doc.status === "final" ? "معتمد" : "مسودة"]}
       />
-      <div className="avoid-break info-card mt-3 flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-1.5">
-            <BadgeCheck size={14} className="text-brand-700" />
-            <span className="text-[11px] font-bold text-brand-800">مستند موثق إلكترونياً — رمز التحقق: {toDigits(doc.number, arabic)}</span>
+      {profile.showDigitalVerification && (
+        <div className="avoid-break info-card mt-3 flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5">
+              <BadgeCheck size={14} className="text-brand-700" />
+              <span className="text-[11px] font-bold text-brand-800">مستند موثق إلكترونياً — رمز التحقق: {toDigits(doc.number, arabic)}</span>
+            </div>
+            <p className="mt-1 text-[10.5px] leading-6 text-slate-600">الجهة المصدرة: <b>{settings.orgName}</b></p>
+            <p className="text-[10.5px] leading-6 text-slate-600">تاريخ التحرير: {fmtDate(doc.date, arabic)}</p>
+            {(doc.signatures?.length || 0) > 0 && (
+              <p className="mt-0.5 flex items-center gap-1 text-[10px] font-bold text-emerald-700"><Fingerprint size={11} /> موثق بالتوقيع والبصمة: {toDigits(doc.signatures?.length || 0, arabic)} توقيع</p>
+            )}
           </div>
-          <p className="mt-1 text-[10.5px] leading-6 text-slate-600">
-            الجهة المصدرة: <b>{settings.orgName}</b>
-          </p>
-          <p className="text-[10.5px] leading-6 text-slate-600">تاريخ التحرير: {fmtDate(doc.date, arabic)} — الموافق {hijriDate(doc.date)}</p>
-          {(doc.signatures?.length || 0) > 0 && (
-            <p className="mt-0.5 flex items-center gap-1 text-[10px] font-bold text-emerald-700">
-              <Fingerprint size={11} /> موثق بالتوقيع والبصمة: {toDigits(doc.signatures?.length || 0, arabic)} توقيع
-            </p>
-          )}
+          {profile.showQr && <QrBox value={verifyUrl || `sajil://verify/${doc.number}`} label={`تحقق ${toDigits(doc.number, arabic)}`} />}
         </div>
-        <QrBox value={verifyUrl || `sajil://verify/${doc.number}`} label={`تحقق ${toDigits(doc.number, arabic)}`} />
-      </div>
+      )}
 
       <div className="doc-title mt-4">{doc.title}</div>
       <div className="doc-title-rule" />
-      <div className="doc-body">
-        {paragraphs.map((p, i) => <p key={i}>{p}</p>)}
-      </div>
+      <div
+        className="doc-body"
+        dangerouslySetInnerHTML={{
+          __html: DOMPurify.sanitize(bodyHtml, {
+            USE_PROFILES: { html: true },
+            FORBID_TAGS: ["style", "script", "iframe", "object", "embed"],
+            FORBID_ATTR: ["onerror", "onclick", "onload"],
+          }),
+        }}
+      />
 
       {doc.amount !== undefined && (
         <div className="avoid-break amount-box">
@@ -333,7 +333,9 @@ function DocSheet({ id }: { id: string }) {
 
       <div className="avoid-break sign-row">
         {signatories.map((s, i) => {
-          const sig = doc.signatures?.find((x) => x.method === "biometric" && (x.role === s.role || (s.role.includes("الثاني") && x.role.includes("الثاني"))));
+          const sig = !paperMode && profile.signatureMode !== "manual"
+            ? doc.signatures?.find((x) => x.method === "biometric" && (x.role === s.role || (s.role.includes("الثاني") && x.role.includes("الثاني"))))
+            : undefined;
           return (
             <div key={i} className="sign-box">
               <p className="text-[10.5px] font-bold text-slate-600">{s.role}</p>
@@ -367,10 +369,10 @@ function DocSheet({ id }: { id: string }) {
         حُرر هذا المستند برضا الطرفين وبكامل الأهلية المعتبرة شرعاً ونظاماً، ويُعتد به سنداً للحقوق الواردة فيه، ولا يتضمن أي فوائد أو زيادة على أصل المبلغ.
       </div>
 
-      <SheetFooter />
+      <SheetFooter profile={profile} />
 
-      {/* شريط التوثيق البيومتري — يظهر على الشاشة فقط ولا يُطبع */}
-      <div className="no-print mt-4 flex flex-wrap items-center justify-center gap-2">
+      {/* التوثيق البيومتري متاح في النمط الرقمي فقط؛ الورقي يترك التوقيع والختم يدوياً. */}
+      {!paperMode && profile.signatureMode !== "manual" && <div className="no-print mt-4 flex flex-wrap items-center justify-center gap-2">
         <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
           <ShieldCheck size={14} />
           إلحاق التوقيع وبصمة الإصبع من حساس الجهاز — البصمة لا تُخزَّن ولا تغادر الحساس، ويُحفظ إثبات تحقق بيومتري مربوط بمحتوى المستند.
@@ -378,10 +380,10 @@ function DocSheet({ id }: { id: string }) {
         <Button size="sm" onClick={() => openSignModal("الطرف الثاني")}>
           <Fingerprint size={14} /> إلحاق توقيع وبصمة
         </Button>
-      </div>
+      </div>}
 
       <div className="no-print">
-        {signOpen && (
+        {!paperMode && profile.signatureMode !== "manual" && signOpen && (
           <Modal open onClose={() => setSignOpen(false)} title="إلحاق التوقيع وبصمة الإصبع">
             <div className="space-y-4">
               <div className="rounded-xl bg-emerald-50 p-3 text-[11.5px] leading-6 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">

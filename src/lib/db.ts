@@ -144,6 +144,27 @@ export async function initDB(): Promise<void> {
   }
 
   await seedIfEmpty();
+  await ensureTemplateMetadata();
+}
+
+/** ترحيل القوالب القديمة إلى نموذج المتغيرات وإعدادات الطباعة دون تغيير نصها. */
+async function ensureTemplateMetadata(): Promise<void> {
+  const { normalizeTemplate } = await import("./document-template");
+  const templates = await db.templates.toArray();
+  for (const template of templates) {
+    const normalized = normalizeTemplate(template);
+    const needsUpdate = !template.variables || !template.printProfile || !template.version || !template.updatedAt;
+    if (needsUpdate) {
+      await db.templates.update(template.id, {
+        variables: normalized.variables,
+        printProfile: normalized.printProfile,
+        version: normalized.version,
+        updatedAt: normalized.updatedAt,
+      });
+    }
+  }
+  const row = await db.settings.get("schemaVersion");
+  if (((row?.value as number) || 0) < 7) await db.settings.put({ key: "schemaVersion", value: 7 });
 }
 
 /* ====== الإعدادات ====== */
